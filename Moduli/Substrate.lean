@@ -1,3 +1,10 @@
+import Mathlib.AlgebraicGeometry.EllipticCurve.VariableChange
+import Mathlib.AlgebraicGeometry.EllipticCurve.ModelsWithJ
+import Mathlib.CategoryTheory.FiberedCategory.Cartesian
+import Mathlib.CategoryTheory.FiberedCategory.Fibered
+import Mathlib.CategoryTheory.FiberedCategory.Fiber
+import Mathlib.CategoryTheory.FiberedCategory.Grothendieck
+
 /-!
 # M0 substrate audit (revised blueprint §7)
 
@@ -5,13 +12,6 @@ This file proves (as `example`s) that every Mathlib substrate declaration requir
 the blueprint exists with the expected orientation and typeclass context.
 Nothing is exported; every item has a one-line comment citing the blueprint label.
 -/
-
-import Mathlib.AlgebraicGeometry.EllipticCurve.VariableChange
-import Mathlib.AlgebraicGeometry.EllipticCurve.ModelsWithJ
-import Mathlib.CategoryTheory.FiberedCategory.Cartesian
-import Mathlib.CategoryTheory.FiberedCategory.Fibered
-import Mathlib.CategoryTheory.FiberedCategory.Fiber
-import Mathlib.CategoryTheory.FiberedCategory.Grothendieck
 
 open WeierstrassCurve CategoryTheory
 

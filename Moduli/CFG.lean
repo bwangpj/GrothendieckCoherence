@@ -1,3 +1,7 @@
+import Mathlib.CategoryTheory.FiberedCategory.Fibered
+import Mathlib.CategoryTheory.FiberedCategory.Fiber
+import Mathlib.CategoryTheory.Groupoid
+
 /-!
 # General criterion for categories fibered in groupoids (CFG)
 
@@ -14,10 +18,6 @@ This file proves the general category-theoretic criterion characterising when a 
 
 Namespace: `CategoryTheory.Functor` (generic placement, matching Mathlib conventions).
 -/
-
-import Mathlib.CategoryTheory.FiberedCategory.Fibered
-import Mathlib.CategoryTheory.FiberedCategory.Fiber
-import Mathlib.CategoryTheory.Groupoid
 
 open CategoryTheory Category IsHomLift IsStronglyCartesian Functor
 
