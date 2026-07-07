@@ -1,4 +1,4 @@
-import GrothendieckCoherence.Moduli.Fibered
+import Moduli.Fibered
 import Mathlib.AlgebraicGeometry.EllipticCurve.VariableChange
 import Mathlib.CategoryTheory.ObjectProperty.FullSubcategory
 import Mathlib.CategoryTheory.FiberedCategory.Cartesian

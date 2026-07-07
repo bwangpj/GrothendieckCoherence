@@ -1,4 +1,4 @@
-import GrothendieckCoherence.Moduli.Moduli
+import Moduli.Moduli
 import Mathlib.Algebra.MvPolynomial.CommRing
 import Mathlib.Algebra.MvPolynomial.Eval
 import Mathlib.RingTheory.Localization.Away.Basic

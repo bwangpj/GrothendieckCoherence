@@ -1,4 +1,4 @@
-import GrothendieckCoherence.Moduli.Weierstrass
+import Moduli.Weierstrass
 import Mathlib.CategoryTheory.FiberedCategory.Cartesian
 import Mathlib.CategoryTheory.FiberedCategory.Fibered
 import Mathlib.CategoryTheory.FiberedCategory.Fiber
