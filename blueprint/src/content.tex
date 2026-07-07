@@ -1,0 +1,1190 @@
+% !TeX program = pdflatex
+%==============================================================================
+%  A DETAILED FORMALISATION BLUEPRINT
+%  From current Mathlib to Grothendieck's Coherence Theorem (EGA III.3.2.1)
+%
+%  Target (from derivedpushforward.lean):
+%    {X Y : Scheme.{u}} (f : X ⟶ Y) [IsProper f] [IsLocallyNoetherian Y]
+%    (M : X.Modules) [M.IsFinitePresentation] (n : ℕ) :
+%    (((Modules.pushforward f).rightDerived n).obj M).IsFinitePresentation
+%
+%  This blueprint decomposes the whole development into a dependency graph of
+%  definitions and lemmas, each with a statement, references, dependencies
+%  (\uses), an intended Lean name (\lean), a Mathlib-status flag, and a proof
+%  sketch, starting from what is in Mathlib today and ending at the theorem.
+%
+%  PORTING TO leanblueprint: move the body into blueprint/src/content.tex and
+%  delete the STANDALONE SHIM block; the package supplies the macros and the
+%  theorem environments.
+%
+%  Mathlib status flags:  \mathlibok  (present today, modulo API glue)
+%                         \mathlibpartial (partly present; must be extended)
+%                         \notready   (absent; must be built)
+%  Reference tags "NNNN" are Stacks Project tags (stacks.math.columbia.edu).
+%==============================================================================
+\documentclass[11pt]{report}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{alltt}
+\usepackage[T1]{fontenc}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+%--------------------- STANDALONE SHIM (delete under leanblueprint) ------------
+\providecommand{\lean}[1]{\par\smallskip\noindent{\footnotesize\textsf{Lean:}\ \texttt{#1}}}
+\providecommand{\uses}[1]{\par\noindent{\footnotesize\textsf{Uses:}\ \texttt{#1}}}
+\providecommand{\leanok}{}
+\providecommand{\notready}{\par\noindent{\footnotesize\textcolor{gray}{[absent from Mathlib: to be built]}}}
+\providecommand{\mathlibok}{\par\noindent{\footnotesize\textcolor{gray}{[in Mathlib today, modulo API glue]}}}
+\providecommand{\mathlibpartial}{\par\noindent{\footnotesize\textcolor{gray}{[partly in Mathlib: must be extended]}}}
+\providecommand{\discussion}[1]{}
+%------------------------------------------------------------------------------
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[chapter]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{construction}[theorem]{Construction}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\Spec}{\operatorname{Spec}}
+\newcommand{\Proj}{\operatorname{Proj}}
+\newcommand{\Supp}{\operatorname{Supp}}
+\newcommand{\Hom}{\operatorname{Hom}}
+\newcommand{\Gammaf}{\Gamma}
+\newcommand{\Ff}{\mathcal{F}}
+\newcommand{\Gg}{\mathcal{G}}
+\newcommand{\Hh}{\mathcal{H}}
+\newcommand{\Ii}{\mathcal{I}}
+\newcommand{\Ll}{\mathcal{L}}
+\newcommand{\Oo}{\mathcal{O}}
+\newcommand{\Bb}{\mathcal{B}}
+\newcommand{\PP}{\mathbf{P}}
+\newcommand{\kk}{\kappa}
+\newcommand{\Rr}{\mathrm{R}}
+\newcommand{\Cech}{\check{\mathrm{C}}}
+\newcommand{\stacks}[1]{\href{https://stacks.math.columbia.edu/tag/#1}{\texttt{#1}}}
+
+\title{A Detailed Formalisation Blueprint\\
+\large From current Mathlib to Grothendieck's Coherence Theorem\\
+(EGA III, Th\'eor\`eme 3.2.1)}
+\author{Blueprint for a Lean~4 / Mathlib formalisation}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+%##############################################################################
+\part{Baseline, strategy, and the target}
+%##############################################################################
+
+\chapter{The target theorem}\label{chap:target}
+
+\begin{theorem}[Grothendieck's Coherence Theorem; EGA III, Th\'eor\`eme 3.2.1]\label{thm:goal}
+Let $Y$ be a locally Noetherian scheme and $f\colon X\to Y$ a proper morphism.
+For every coherent $\Oo_X$-module $\Ff$ and every $n\ge 0$, the $\Oo_Y$-module
+$\Rr^n f_*\Ff$ is coherent. Equivalently, in the form of
+\texttt{derivedpushforward.lean}: for $f$ proper, $Y$ locally Noetherian and
+$M$ a sheaf of modules of finite presentation on $X$, the object
+$\bigl((\mathrm{Modules.pushforward}\,f).\mathrm{rightDerived}\,n\bigr)(M)$ is
+of finite presentation for every $n$.
+\lean{AlgebraicGeometry.Scheme.rightDerivedPushforward\_isFinitePresentation\_of\_isProper}
+\uses{thm:finiteness, prop:bridge-rderived, lem:fp-iff-coh}
+\notready
+\end{theorem}
+
+Reference: EGA III \cite{EGA3}; Stacks, Proposition 30.19.1, tag~\stacks{02O5}
+\cite{stacks}; Hartshorne, III.8.8 (projective case) \cite{Hartshorne};
+Vakil, \S18.9 \cite{Vakil}. The whole blueprint is the proof of
+Theorem~\ref{thm:goal}: Part~\ref{part:qcoh}--\ref{part:cech} build the
+missing cohomological substrate on top of what Mathlib has today,
+Parts~\ref{part:proj}--\ref{part:chow} build the geometric inputs, and
+Part~\ref{part:finiteness} assembles the theorem.
+
+\chapter{What Mathlib provides today}\label{chap:baseline}
+
+The following are present in Mathlib and are the starting line. Item names are
+the relevant modules or declarations; ``modulo API glue'' means the object
+exists but auxiliary lemmas about it may still be needed.
+
+\begin{description}[leftmargin=1.4em]
+\item[Schemes.] \texttt{AlgebraicGeometry.Scheme}, morphisms, \texttt{Spec},
+the $\Gamma\!\dashv\!\Spec$ adjunction, fibre products, open/closed
+immersions, and a large morphism-property library (finite type, separated,
+quasi-compact, quasi-separated, affine, universally closed, integral, closed
+immersion). \mathlibok
+\item[Proper and Noetherian.] \texttt{AlgebraicGeometry.Morphisms.Proper}
+(\texttt{IsProper}); \texttt{AlgebraicGeometry.Noetherian}
+(\texttt{IsNoetherian}, \texttt{IsLocallyNoetherian}). \mathlibok
+\item[Sheaves of modules.]
+\texttt{Mathlib.Algebra.Category.ModuleCat.Sheaf} and
+\texttt{AlgebraicGeometry.Modules.Sheaf}: the category
+$\texttt{SheafOfModules}$, its abelian structure
+(\texttt{Modules.instAbelian}), the pushforward and pullback functors
+(\texttt{Scheme.Modules.pushforward}, \texttt{pullback}), the adjunction
+(\texttt{pullbackPushforwardAdjunction}), and the coherence isomorphisms
+\texttt{pushforwardId}, \texttt{pushforwardComp}. \mathlibok
+\item[Quasi-coherence, abstractly.]
+\texttt{Mathlib.Algebra.Category.ModuleCat.Sheaf.Quasicoherent}: a sheaf of
+modules is quasi-coherent if it is locally the cokernel of a map between
+coproducts of copies of the structure sheaf, and of finite presentation when
+these are finite (\texttt{SheafOfModules.IsFinitePresentation}). \mathlibok
+\item[The affine model $\widetilde M$.]
+\texttt{AlgebraicGeometry.Modules.Tilde}: for an $R$-module $M$, the sheaf
+$\widetilde M$ of $\Oo_{\Spec R}$-modules, with its localisation-to-stalk
+maps. \mathlibpartial\ (the sheaf and its stalks exist; the equivalence
+$\mathrm{QCoh}(\Spec R)\simeq \mathrm{Mod}_R$ and the pushforward/pullback
+compatibilities are not all present).
+\item[Derived functors.]
+\texttt{CategoryTheory.Abelian.RightDerived} and
+\texttt{Abelian.GrothendieckCategory.EnoughInjectives}: any Grothendieck
+abelian category (in particular \texttt{SheafOfModules}) has enough
+injectives, so \texttt{Functor.rightDerived} of a left exact functor is
+defined; hence
+$(\mathrm{Modules.pushforward}\,f).\mathrm{rightDerived}\,n$ exists. \mathlibok
+\item[Proj.] \texttt{AlgebraicGeometry.ProjectiveSpectrum.Scheme}: $\Proj S$
+of a graded ring as a scheme. \mathlibpartial\ (the scheme exists; the
+twisting sheaves and the graded-module$\,\to\,$sheaf functor are absent).
+\item[Homological algebra.] Abelian categories, injective resolutions,
+$\delta$-functors, long exact sequences, $\mathrm{Ext}$, spectral objects and
+some spectral-sequence API (\texttt{CategoryTheory.Abelian},
+\texttt{Homology}). \mathlibok
+\end{description}
+
+\chapter{What must be built, and the critical path}\label{chap:gaps}
+
+Relative to Chapter~\ref{chap:baseline}, the development requires the
+following, in dependency order. Each is a Part below.
+\begin{enumerate}[leftmargin=1.6em]
+\item \textbf{Quasi-coherent sheaves on schemes} (Part~\ref{part:qcoh}): the
+affine equivalence via $\widetilde{(-)}$, quasi-coherence of the geometric
+$\Oo_X$-modules, and the operations used later.
+\item \textbf{Cohomology of $\Oo_X$-modules} (Part~\ref{part:cohomology}):
+$H^i(X,-)$ and $\Rr^i f_*$ as derived functors, the flasque package, and the
+comparison of the abstract \texttt{rightDerived} with geometric cohomology.
+\item \textbf{\v{C}ech cohomology and affine vanishing} (Part~\ref{part:cech}):
+the \v{C}ech complex, Serre's vanishing on affines, \v{C}ech computes
+cohomology for affine covers, and quasi-coherence of $\Rr^i f_*$.
+\item \textbf{Projective space and Proj} (Part~\ref{part:proj}): twisting
+sheaves, coherent sheaves from graded modules, and the explicit cohomology of
+$\PP^n$.
+\item \textbf{Coherent sheaves} (Part~\ref{part:coherent}): the coherence
+predicate, coherence $=$ finite presentation on locally Noetherian schemes,
+operations, closed immersions, support.
+\item \textbf{Projective morphisms} (Part~\ref{part:projmor}): relative
+ampleness and coherence/vanishing of $\Rr^p f_*$ along projective morphisms.
+\item \textbf{D\'evissage} (Part~\ref{part:devissage}) and \textbf{Chow's
+lemma} (Part~\ref{part:chow}).
+\item \textbf{The finiteness theorem} (Part~\ref{part:finiteness}) and the
+\textbf{bridge} to the Lean statement (Part~\ref{part:bridge}).
+\end{enumerate}
+
+\begin{remark}[On spectral sequences]\label{rem:no-ss}
+The relative Leray (Grothendieck) spectral sequence is \emph{not} on the
+critical path. Following the note \cite{Note} incorporated earlier, the single
+step of the [EGA] proof that used it is carried out by the flasque
+acyclic-pushforward Lemma~\ref{lem:acyclic-pushforward}, which lives in the
+flasque layer of Part~\ref{part:cohomology} and needs only: injectives are
+flasque, pushforward preserves flasqueness, flasque sheaves are acyclic, and
+acyclic resolutions compute derived functors. No construction of a spectral
+sequence of a composite of functors is required anywhere below.
+\end{remark}
+
+\chapter{Conventions}\label{chap:conventions}
+Schemes and morphisms are as in Mathlib's \texttt{AlgebraicGeometry}. For an
+$\Oo_X$-module $\Ff$, $H^i(X,\Ff)$ is the $i$-th right derived functor of
+$\Gamma(X,-)$ on the abelian category of $\Oo_X$-modules, and $\Rr^i f_*$ the
+$i$-th right derived functor of $f_*$. ``Coherent'' is
+Definition~\ref{def:coherent}; on locally Noetherian schemes it coincides with
+quasi-coherent of finite type and with finite presentation
+(Lemma~\ref{lem:fp-iff-coh}). A \emph{projective morphism} is one admitting a
+closed immersion into some $\PP^n_S$ over the base
+(Definition~\ref{def:projective-morphism}).
+
+%##############################################################################
+\part{Quasi-coherent sheaves on schemes}\label{part:qcoh}
+%##############################################################################
+
+\chapter{The affine model: the functor \texorpdfstring{$\widetilde{(-)}$}{tilde}}\label{chap:tilde}
+
+Reference: Stacks, Section 26.7, tag~\stacks{01I6}, and Section 17.10
+\cite{stacks}; Hartshorne, II.5 \cite{Hartshorne}.
+
+\begin{construction}[The functor $\widetilde{(-)}$]\label{con:tilde}
+For a commutative ring $R$, sending an $R$-module $M$ to the
+$\Oo_{\Spec R}$-module $\widetilde M$ (Mathlib's
+\texttt{ModuleCat.tildeInModuleCat}) is functorial and additive, giving
+$\widetilde{(-)}\colon \mathrm{Mod}_R\to \mathrm{Mod}(\Oo_{\Spec R})$.
+\lean{ModuleCat.tildeFunctor}
+\mathlibpartial
+\end{construction}
+
+\begin{lemma}[Sections and stalks of $\widetilde M$]\label{lem:tilde-sections}
+For $f\in R$ and a prime $\mathfrak p$,
+$\widetilde M(D(f))\cong M_f$ (as $R_f$-modules), $\Gamma(\Spec R,\widetilde
+M)\cong M$, and $(\widetilde M)_{\mathfrak p}\cong M_{\mathfrak p}$; these are
+natural in $M$. Reference: Stacks, Lemma 26.7.1, tag~\stacks{01I6}.
+\lean{ModuleCat.Tilde.sections\_basicOpen, ModuleCat.Tilde.stalkIso}
+\uses{con:tilde}
+\mathlibpartial
+\end{lemma}
+
+\begin{lemma}[$\widetilde{(-)}$ is exact and fully faithful]\label{lem:tilde-ff}
+The functor $\widetilde{(-)}$ is exact and fully faithful; on morphisms it is
+the bijection $\Hom_R(M,N)\cong\Hom_{\Oo_{\Spec R}}(\widetilde M,\widetilde
+N)$. Reference: Stacks, tag~\stacks{01I6}; Hartshorne, II.5.2, II.5.5.
+\lean{ModuleCat.tildeFunctor\_fullyFaithful, ModuleCat.tildeFunctor\_exact}
+\uses{lem:tilde-sections}
+\notready
+\end{lemma}
+
+\begin{proposition}[Affine equivalence]\label{prop:affine-equiv}
+$\widetilde{(-)}$ induces an equivalence
+$\mathrm{Mod}_R\simeq \mathrm{QCoh}(\Spec R)$ onto the quasi-coherent
+$\Oo_{\Spec R}$-modules, with quasi-inverse $\Gamma(\Spec R,-)$. Reference:
+Stacks, Lemma 26.7.1 and Section 26.7, tag~\stacks{01I6}.
+\lean{AlgebraicGeometry.Spec.qcohEquivModule}
+\uses{lem:tilde-ff, def:qcoh}
+\notready
+\end{proposition}
+
+\begin{lemma}[Functoriality on affines]\label{lem:tilde-functorial}
+For a ring map $\varphi\colon R\to S$ inducing $\psi\colon \Spec S\to\Spec R$:
+$\psi_*\widetilde N\cong\widetilde{N_R}$ (restriction of scalars) for an
+$S$-module $N$, and $\psi^*\widetilde M\cong\widetilde{S\otimes_R M}$ for an
+$R$-module $M$, naturally. Reference: Stacks, Lemma 26.7.3, tag~\stacks{01I6}.
+\lean{AlgebraicGeometry.Spec.pushforward\_tilde, AlgebraicGeometry.Spec.pullback\_tilde}
+\uses{prop:affine-equiv}
+\notready
+\end{lemma}
+
+\chapter{Quasi-coherent sheaves on general schemes}\label{chap:qcoh}
+
+\begin{definition}[Quasi-coherent $\Oo_X$-module]\label{def:qcoh}
+An $\Oo_X$-module $\Ff$ is \emph{quasi-coherent} if $X$ has an affine open
+cover $\{U_i=\Spec R_i\}$ with $\Ff|_{U_i}\cong\widetilde{M_i}$ for
+$R_i$-modules $M_i$. Reference: Stacks, tag~\stacks{01BD}; Hartshorne, II.5.4.
+\lean{AlgebraicGeometry.Scheme.Modules.IsQuasicoherent}
+\uses{con:tilde}
+\notready
+\end{definition}
+
+\begin{lemma}[Agreement with the abstract predicate]\label{lem:qcoh-agree}
+Definition~\ref{def:qcoh} agrees with the abstract quasi-coherence of
+\texttt{SheafOfModules.IsQuasicoherent} (local presentation as a cokernel of
+free modules): a geometric $\Oo_X$-module is quasi-coherent in the sense of
+Definition~\ref{def:qcoh} iff its image in \texttt{SheafOfModules} is. This is
+the link between the geometric layer and the existing Mathlib predicate.
+Reference: Stacks, tag~\stacks{01BG}.
+\lean{AlgebraicGeometry.Scheme.Modules.isQuasicoherent\_iff\_sheafOfModules}
+\uses{def:qcoh, prop:affine-equiv}
+\notready
+\end{lemma}
+
+\begin{lemma}[Local nature]\label{lem:qcoh-local}
+Quasi-coherence is local: if $\Ff|_{U_i}$ is quasi-coherent for an open cover
+$\{U_i\}$ then $\Ff$ is; and on an affine $\Spec R$ every quasi-coherent sheaf
+is $\widetilde M$ for $M=\Gamma$. Reference: Stacks, tag~\stacks{01I6}.
+\lean{AlgebraicGeometry.Scheme.Modules.isQuasicoherent\_of\_cover}
+\uses{def:qcoh, prop:affine-equiv}
+\notready
+\end{lemma}
+
+\begin{lemma}[The structure sheaf and pullbacks]\label{lem:qcoh-basic}
+$\Oo_X$ is quasi-coherent, and for any $f\colon X\to Y$ the pullback
+$f^*\Gg$ of a quasi-coherent $\Gg$ is quasi-coherent. Reference: Stacks,
+tags~\stacks{01BE}, \stacks{01BM}.
+\lean{AlgebraicGeometry.Scheme.Modules.isQuasicoherent\_pullback}
+\uses{def:qcoh, lem:tilde-functorial}
+\notready
+\end{lemma}
+
+\begin{proposition}[Quasi-coherent sheaves form a Serre--abelian subcategory]\label{prop:qcoh-abelian}
+Kernels, cokernels, images and finite direct sums of morphisms of
+quasi-coherent sheaves are quasi-coherent, as are extensions; hence
+$\mathrm{QCoh}(X)$ is a weak Serre subcategory of $\mathrm{Mod}(\Oo_X)$ and is
+abelian, and the inclusion is exact. Reference: Stacks, tags~\stacks{01BJ},
+\stacks{01LA}.
+\lean{AlgebraicGeometry.Scheme.Modules.qcoh\_isAbelian}
+\uses{def:qcoh, lem:tilde-ff, prop:affine-equiv}
+\notready
+\end{proposition}
+
+\begin{remark}
+Quasi-coherence of \emph{pushforwards} $f_*$ and of $\Rr^i f_*$ needs
+cohomological input (vanishing on affines) and is deferred to
+Chapter~\ref{chap:hdi-qcoh}.
+\end{remark}
+
+\chapter{Invertible sheaves and twists}\label{chap:invertible}
+
+Only a light amount is needed, for the projective case and Chow's lemma.
+
+\begin{definition}[Locally free and invertible]\label{def:invertible}
+An $\Oo_X$-module is \emph{locally free of rank $r$} if $X$ has an open cover
+on which it is $\Oo^{\oplus r}$, and \emph{invertible} if locally free of rank
+$1$. Invertible sheaves form a group $\mathrm{Pic}(X)$ under $\otimes_{\Oo_X}$.
+Reference: Stacks, tag~\stacks{01CR}; Hartshorne, II.6.12.
+\lean{AlgebraicGeometry.Scheme.Modules.IsInvertible}
+\mathlibpartial
+\end{definition}
+
+\begin{lemma}[Tensoring by an invertible sheaf is exact]\label{lem:tensor-invertible-exact}
+For an invertible $\Ll$, the functor $-\otimes_{\Oo_X}\Ll$ is exact and
+preserves quasi-coherence and (later) coherence, with inverse
+$-\otimes\Ll^{-1}$. Reference: Stacks, tag~\stacks{01CR}.
+\lean{AlgebraicGeometry.Scheme.Modules.tensorInvertible\_exact}
+\uses{def:invertible, prop:qcoh-abelian}
+\notready
+\end{lemma}
+
+%##############################################################################
+\part{Cohomology of \texorpdfstring{$\Oo_X$}{OX}-modules}\label{part:cohomology}
+%##############################################################################
+
+References: Stacks, Chapter 20 (Cohomology of Sheaves) and Chapter 30 (Cohomology
+of Schemes) \cite{stacks}; Hartshorne, III.1--III.2, III.8 \cite{Hartshorne}.
+
+\chapter{Sheaf cohomology and higher direct images}\label{chap:cohomology-def}
+
+\begin{definition}[Sheaf cohomology]\label{def:sheaf-cohomology}
+For a scheme $X$, $H^i(X,-)$ is the $i$-th right derived functor of
+$\Gamma(X,-)\colon \mathrm{Mod}(\Oo_X)\to \mathrm{Ab}$, computed by injective
+resolutions (which exist: $\mathrm{Mod}(\Oo_X)$ is a Grothendieck abelian
+category, already available in Mathlib). Reference: Stacks, tag~\stacks{01FR};
+Hartshorne, III.2.
+\lean{AlgebraicGeometry.Scheme.cohomology}
+\uses{}
+\notready
+\end{definition}
+
+\begin{definition}[Higher direct image]\label{def:higher-direct-image}
+For $f\colon X\to Y$, $\Rr^i f_*$ is the $i$-th right derived functor of the
+left exact functor $f_*\colon \mathrm{Mod}(\Oo_X)\to\mathrm{Mod}(\Oo_Y)$.
+Reference: Stacks, tag~\stacks{01F1}; Hartshorne, III.8.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage}
+\uses{}
+\notready
+\end{definition}
+
+\begin{lemma}[Left exactness]\label{lem:pf-left-exact}
+$\Gamma(X,-)$ and $f_*$ are additive and left exact; $f_*$ is right adjoint to
+$f^*$ (present in Mathlib as \texttt{pullbackPushforwardAdjunction}), whence
+left exactness. Reference: Stacks, tag~\stacks{01F1}.
+\lean{AlgebraicGeometry.Scheme.Modules.pushforward\_leftExact}
+\uses{def:higher-direct-image}
+\mathlibpartial
+\end{lemma}
+
+\begin{lemma}[Cohomological $\delta$-functor]\label{lem:les}
+$\{H^i(X,-)\}$ and $\{\Rr^i f_*\}$ are cohomological $\delta$-functors: a short
+exact sequence $0\to\Ff'\to\Ff\to\Ff''\to 0$ yields a natural long exact
+sequence, with $H^0=\Gamma$, $\Rr^0 f_*=f_*$. Reference: Stacks,
+tag~\stacks{0156}; the $\delta$-functor API is in Mathlib
+(\texttt{CategoryTheory.Abelian.RightDerived}).
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_deltaFunctor}
+\uses{def:sheaf-cohomology, def:higher-direct-image, lem:pf-left-exact}
+\mathlibpartial
+\end{lemma}
+
+\begin{lemma}[Higher direct image as a sheafification]\label{lem:hdi-sheafification}
+$\Rr^i f_*\Ff$ is the sheaf associated to the presheaf $V\mapsto
+H^i(f^{-1}(V),\Ff|_{f^{-1}(V)})$ on $Y$. In particular $\Rr^i f_*\Ff|_V$
+depends only on $\Ff|_{f^{-1}(V)}$, so the computation of $\Rr^i f_*$ is local
+on $Y$. Reference: Stacks, Lemma 20.7.3, tag~\stacks{01E0}; Hartshorne, III.8.1.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_isSheafification}
+\uses{def:sheaf-cohomology, def:higher-direct-image}
+\notready
+\end{lemma}
+
+\chapter{Flasque sheaves and acyclic resolutions}\label{chap:flasque}
+
+This chapter is the light replacement for the relative Leray spectral sequence
+(Remark~\ref{rem:no-ss}); it also supplies the acyclic resolutions used to
+compute cohomology in later parts.
+
+\begin{definition}[Flasque sheaf]\label{def:flasque}
+A sheaf $\Ff$ on a topological space is \emph{flasque} if $\Ff(U)\to\Ff(V)$ is
+surjective for all opens $V\subseteq U$. Reference: Stacks, tag~\stacks{01AF};
+Hartshorne, II.\,Ex.1.16.
+\lean{TopCat.Presheaf.IsFlasque}
+\notready
+\end{definition}
+
+\begin{lemma}[Injectives are flasque]\label{lem:injective-flasque}
+Every injective $\Oo_X$-module is flasque. Reference: Stacks,
+tag~\stacks{01EA}; Hartshorne, III.2.4.
+\lean{AlgebraicGeometry.Scheme.Modules.injective\_isFlasque}
+\uses{def:flasque}
+\notready
+\end{lemma}
+
+\begin{lemma}[Pushforward preserves flasqueness]\label{lem:pushforward-flasque}
+If $\Ff$ is flasque on $X$ and $g\colon X\to X'$ continuous, then $g_*\Ff$ is
+flasque, since $(g_*\Ff)(V)=\Ff(g^{-1}V)$. Reference: Stacks, tag~\stacks{01E9}.
+\lean{TopCat.Presheaf.isFlasque\_pushforward}
+\uses{def:flasque}
+\notready
+\end{lemma}
+
+\begin{lemma}[Flasque sheaves are acyclic]\label{lem:flasque-acyclic}
+If $\Ff$ is flasque then $H^i(X,\Ff)=0$ and $\Rr^i f_*\Ff=0$ for all $i>0$.
+Reference: Stacks, Lemma 20.12.3, tag~\stacks{01EB}; Hartshorne, III.2.5.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_flasque\_eq\_zero}
+\uses{def:flasque, lem:les, lem:hdi-sheafification}
+\notready
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+Flasqueness is preserved under quotients by flasque subsheaves, and if two
+terms of a short exact sequence are flasque so is the third; embedding $\Ff$
+in an injective (hence flasque) $\Ii$ and using the long exact sequence
+(Lemma~\ref{lem:les}) gives the vanishing by dimension shifting. For
+$\Rr^i f_*$ use Lemma~\ref{lem:hdi-sheafification} and the same argument on
+each $f^{-1}(V)$. Faithful to Stacks, tag~\stacks{01EB}.
+\end{proof}
+
+\begin{lemma}[Acyclic resolutions compute derived functors]\label{lem:acyclic-resolution}
+If $0\to\Ff\to\mathcal A^0\to\mathcal A^1\to\cdots$ is a resolution with each
+$\mathcal A^k$ acyclic for $\Gamma(X,-)$ (resp. $f_*$), then
+$H^i(X,\Ff)\cong H^i(\Gamma(X,\mathcal A^\bullet))$ (resp.
+$\Rr^i f_*\Ff\cong H^i(f_*\mathcal A^\bullet)$). Reference: Stacks,
+tag~\stacks{0156} (derived functor via acyclic resolution); Hartshorne, III.1.2A.
+\lean{AlgebraicGeometry.Scheme.cohomology\_of\_acyclicResolution}
+\uses{lem:flasque-acyclic}
+\notready
+\end{lemma}
+
+\begin{lemma}[Acyclic pushforward lemma]\label{lem:acyclic-pushforward}
+Let $X\xrightarrow{\,g\,}X'\xrightarrow{\,f\,}Y$ and let $\Bb$ be an
+$\Oo_X$-module with $\Rr^q g_*\Bb=0$ for all $q>0$. Then
+$\Rr^q f_*(g_*\Bb)\cong\Rr^q(f\circ g)_*\Bb$ naturally for all $q\ge 0$.
+Reference: the note \cite{Note}.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_pushforward\_of\_acyclic}
+\uses{lem:injective-flasque, lem:pushforward-flasque, lem:flasque-acyclic, lem:acyclic-resolution}
+\notready
+\end{lemma}
+
+\begin{proof}[Proof]
+Take an injective resolution $\Bb\to I^\bullet$. Each $I^k$ is flasque
+(Lemma~\ref{lem:injective-flasque}); since $\Rr^q g_*\Bb=H^q(g_* I^\bullet)$,
+the hypothesis says $g_* I^\bullet$ is a resolution of $g_*\Bb$, with terms
+flasque (Lemma~\ref{lem:pushforward-flasque}) hence $f_*$-acyclic
+(Lemma~\ref{lem:flasque-acyclic}). By Lemma~\ref{lem:acyclic-resolution} and
+$f_*\circ g_*=(f\circ g)_*$,
+$\Rr^q f_*(g_*\Bb)=H^q(f_*g_*I^\bullet)=H^q((f\circ g)_*I^\bullet)
+=\Rr^q(f\circ g)_*\Bb$. Faithful to \cite{Note}.
+\end{proof}
+
+\chapter{Comparison: abstract \texorpdfstring{$\mathrm{rightDerived}$}{rightDerived} vs sheaf cohomology}\label{chap:bridge1}
+
+\begin{proposition}[The abstract derived pushforward computes $\Rr^n f_*$]\label{prop:bridge-rderived}
+For $f\colon X\to Y$ and a quasi-coherent $M\in\texttt{SheafOfModules}(X)$ there
+is a natural isomorphism
+$\bigl((\mathrm{Modules.pushforward}\,f).\mathrm{rightDerived}\,n\bigr)(M)\cong
+\Rr^n f_*M$, compatible with the equivalence between geometric
+$\Oo_X$-modules and \texttt{SheafOfModules}. In particular the object in
+Theorem~\ref{thm:goal} is the geometric higher direct image.
+\lean{AlgebraicGeometry.Scheme.Modules.rightDerivedPushforward\_iso\_higherDirectImage}
+\uses{def:higher-direct-image, lem:pf-left-exact, lem:flasque-acyclic}
+\notready
+\end{proposition}
+
+\begin{proof}[Proof strategy]
+Both are $\delta$-functors agreeing in degree $0$ ($f_*$); it suffices to show
+the abstract one is erasable/effaceable, i.e.\ computed by a class of objects
+acyclic on both sides. Injective objects of \texttt{SheafOfModules} map to
+flasque $\Oo_X$-modules (Lemma~\ref{lem:injective-flasque} adapted), which are
+$f_*$-acyclic (Lemma~\ref{lem:flasque-acyclic}); by uniqueness of derived
+functors the two $\delta$-functors are isomorphic. This is the single
+comparison tying the categorical machinery of the target statement to the
+geometric development.
+\end{proof}
+
+%##############################################################################
+\part{\v{C}ech cohomology and vanishing on affines}\label{part:cech}
+%##############################################################################
+
+References: Stacks, Sections 20.9--20.11 and 30.2--30.4 \cite{stacks};
+Hartshorne, III.3--III.4 \cite{Hartshorne}.
+
+\chapter{The \v{C}ech complex}\label{chap:cech}
+
+\begin{definition}[\v{C}ech complex and cohomology]\label{def:cech}
+For an open cover $\mathcal U=\{U_i\}_{i\in I}$ of $X$ and an $\Oo_X$-module
+$\Ff$, the \v{C}ech complex is
+$\Cech^p(\mathcal U,\Ff)=\prod_{i_0<\dots<i_p}\Ff(U_{i_0\cdots i_p})$ with the
+usual alternating differential, and $\check H^p(\mathcal U,\Ff)$ its
+cohomology. Reference: Stacks, tag~\stacks{01ED}; Hartshorne, III.4.
+\lean{AlgebraicGeometry.Scheme.cechComplex, AlgebraicGeometry.Scheme.cechCohomology}
+\notready
+\end{definition}
+
+\begin{lemma}[\v{C}ech degree $0$ and functoriality]\label{lem:cech-basic}
+$\check H^0(\mathcal U,\Ff)\cong\Gamma(X,\Ff)$, and a short exact sequence of
+sheaves induces a long exact sequence of \v{C}ech cohomology when the cover
+consists of sheafy-acyclic pieces (e.g.\ affines with quasi-coherent $\Ff$).
+Reference: Stacks, tags~\stacks{01EF}, \stacks{01EO}.
+\lean{AlgebraicGeometry.Scheme.cechCohomology\_zero}
+\uses{def:cech}
+\notready
+\end{lemma}
+
+\begin{proposition}[\v{C}ech-to-derived comparison]\label{prop:cech-to-derived}
+There is a natural map $\check H^p(\mathcal U,\Ff)\to H^p(X,\Ff)$, an
+isomorphism in degrees $0,1$ in general, and an isomorphism in all degrees when
+every finite intersection $U_{i_0\cdots i_p}$ is $\Ff$-acyclic (Leray's
+theorem / acyclic covers). Reference: Stacks, Lemma 20.11.6, tag~\stacks{01EW};
+Hartshorne, III.4.5.
+\lean{AlgebraicGeometry.Scheme.cechToDerived, AlgebraicGeometry.Scheme.cechToDerived\_iso\_of\_acyclicCover}
+\uses{def:cech, def:sheaf-cohomology, lem:flasque-acyclic}
+\notready
+\end{proposition}
+
+\chapter{Vanishing on affines and the comparison}\label{chap:affine-vanishing}
+
+\begin{theorem}[Serre: vanishing on affines]\label{thm:affine-vanishing}
+If $X=\Spec R$ is affine and $\Ff$ is quasi-coherent, then $H^i(X,\Ff)=0$ for
+all $i>0$. Reference: Stacks, Lemma 30.2.2, tag~\stacks{01XB}; Hartshorne,
+III.3.5 (Noetherian case) and III.3.7.
+\lean{AlgebraicGeometry.cohomology\_qcoh\_affine\_eq\_zero}
+\uses{def:qcoh, prop:affine-equiv, def:sheaf-cohomology, prop:cech-to-derived}
+\notready
+\end{theorem}
+
+\begin{proof}[Proof outline]
+By Lemma~\ref{lem:hdi-sheafification}/\ref{prop:cech-to-derived} reduce to
+showing the \v{C}ech cohomology of $\widetilde M$ for the standard cover of
+$\Spec R$ by basic opens $D(f_i)$ (with $\sum(f_i)=R$) vanishes above degree
+$0$; the \v{C}ech complex is the Koszul-type complex computing
+$\check H^p=0$ for $p>0$ because localisation is exact and the $f_i$ generate
+the unit ideal. In the Noetherian case one may instead use that a quasi-coherent
+sheaf on $\Spec R$ embeds in a flasque quasi-coherent sheaf and induct. Faithful
+to Stacks, tag~\stacks{01XB}.
+\end{proof}
+
+\begin{corollary}[Affine covers compute cohomology]\label{cor:affine-cover-computes}
+If $X$ is separated (so intersections of affine opens are affine) and
+$\mathcal U$ is an affine open cover, then for quasi-coherent $\Ff$,
+$\check H^p(\mathcal U,\Ff)\cong H^p(X,\Ff)$ for all $p$. Reference: Stacks,
+Lemma 30.2.6, tag~\stacks{01X9}; Hartshorne, III.4.5.
+\lean{AlgebraicGeometry.Scheme.cechCohomology\_iso\_cohomology\_of\_separated}
+\uses{prop:cech-to-derived, thm:affine-vanishing}
+\notready
+\end{corollary}
+
+\chapter{Higher direct images of quasi-coherent sheaves}\label{chap:hdi-qcoh}
+
+\begin{proposition}[$\Rr^i f_*$ preserves quasi-coherence]\label{prop:hdi-qcoh}
+If $f\colon X\to Y$ is quasi-compact and quasi-separated and $\Ff$ is
+quasi-coherent, then $\Rr^i f_*\Ff$ is quasi-coherent for all $i\ge 0$.
+Reference: Stacks, Lemma 30.4.5, tag~\stacks{01XJ}.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_isQuasicoherent}
+\uses{def:higher-direct-image, lem:hdi-sheafification, thm:affine-vanishing, prop:qcoh-abelian}
+\notready
+\end{proposition}
+
+\begin{proof}[Proof outline]
+By Lemma~\ref{lem:hdi-sheafification} the question is local on $Y$, so take
+$Y=\Spec A$. Cover $X$ by finitely many affines; by
+Corollary~\ref{cor:affine-cover-computes} the \v{C}ech complex of quasi-coherent
+sheaves computes $\Rr^i f_*\Ff$, and each \v{C}ech term is quasi-coherent
+(pushforward of quasi-coherent along the affine inclusions of intersections,
+using $qcqs$); quasi-coherence is closed under kernels/cokernels
+(Proposition~\ref{prop:qcoh-abelian}), so the cohomology is quasi-coherent.
+Faithful to Stacks, tag~\stacks{01XJ}.
+\end{proof}
+
+\begin{proposition}[Direct image over an affine base]\label{prop:hdi-affine-base}
+For $A$ a ring, $f\colon X\to\Spec A$ quasi-compact quasi-separated and $\Ff$
+quasi-coherent, $\Rr^i f_*\Ff\cong\widetilde{H^i(X,\Ff)}$; in particular
+$\Rr^i f_*\Ff$ is coherent iff $H^i(X,\Ff)$ is a finite $A$-module. Reference:
+Stacks, Lemma 30.4.6, tag~\stacks{01XK}.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_over\_affine}
+\uses{prop:hdi-qcoh, prop:affine-equiv, lem:tilde-sections}
+\notready
+\end{proposition}
+
+%##############################################################################
+\part{Projective space and Proj}\label{part:proj}
+%##############################################################################
+
+References: Stacks, Sections 27.10--27.14 (Proj) and 30.8, 30.14--30.15
+\cite{stacks}; Hartshorne, II.5, III.5 \cite{Hartshorne}; Serre \cite{Serre-FAC}.
+
+\chapter{Twisting sheaves and graded modules on Proj}\label{chap:proj-twist}
+
+\begin{construction}[The functor $\widetilde{(-)}$ on Proj and twists]\label{con:proj-tilde}
+Let $S$ be a graded ring, finitely generated in degree $1$ over $S_0=A$, and
+$X=\Proj S$ (a scheme in Mathlib). For a graded $S$-module $M$ there is a
+quasi-coherent sheaf $\widetilde M$ on $X$; taking $M=S(d)$ defines the
+twisting sheaves $\Oo_X(d)=\widetilde{S(d)}$, with
+$\Oo_X(d)\otimes\Oo_X(e)\cong\Oo_X(d+e)$ and $\Oo_X(d)$ invertible when $S$ is
+generated in degree $1$. Write $\Ff(d)=\Ff\otimes\Oo_X(d)$. Reference: Stacks,
+Section 27.10, tags~\stacks{01M3}, \stacks{01MT}; Hartshorne, II.5.
+\lean{AlgebraicGeometry.Proj.tildeGraded, AlgebraicGeometry.Proj.twistingSheaf}
+\uses{def:qcoh, def:invertible}
+\notready
+\end{construction}
+
+\begin{lemma}[Sections on the standard cover]\label{lem:proj-sections}
+For $f\in S_1$, $D_+(f)=\Spec (S_{(f)})$ and
+$\Oo_X(d)|_{D_+(f)}\cong\widetilde{(S(d)_{(f)})}$; the standard cover
+$\{D_+(x_i)\}$ for degree-$1$ generators $x_i$ is affine, and its intersections
+are the $D_+(x_{i_0}\cdots x_{i_p})$. Reference: Stacks, tag~\stacks{01M3}.
+\lean{AlgebraicGeometry.Proj.twistingSheaf\_restrict}
+\uses{con:proj-tilde, lem:tilde-sections}
+\notready
+\end{lemma}
+
+\begin{proposition}[Every coherent sheaf on Proj comes from a graded module]\label{prop:proj-graded}
+Let $A$ be Noetherian and $S$ a finitely generated graded $A$-algebra
+generated in degree $1$, $X=\Proj S$. Every coherent $\Oo_X$-module is
+isomorphic to $\widetilde M$ for a finitely generated graded $S$-module $M$,
+and there is $d_0$ with $M_d\xrightarrow{\ \sim\ }H^0(X,\widetilde M(d))$ for
+$d\ge d_0$. Reference: Stacks, Proposition 30.14.4 and Section 30.15,
+tags~\stacks{01YS}, \stacks{01YW}; Hartshorne, II.5.15--5.17.
+\lean{AlgebraicGeometry.Proj.coherent\_from\_gradedModule}
+\uses{con:proj-tilde, def:coherent, lem:proj-sections}
+\notready
+\end{proposition}
+
+\chapter{Cohomology of projective space}\label{chap:cohomology-Pn}
+
+\begin{theorem}[Serre's computation]\label{thm:cohomology-Pn}
+Let $A$ be a ring, $n\ge 0$, $\PP^n_A=\Proj A[T_0,\dots,T_n]$. Then, as graded
+$A$-modules,
+\[
+\bigoplus_d H^0(\PP^n_A,\Oo(d))\cong A[T_0,\dots,T_n],\qquad
+\bigoplus_d H^n(\PP^n_A,\Oo(d))\cong
+\tfrac{1}{T_0\cdots T_n}A[\tfrac1{T_0},\dots,\tfrac1{T_n}],
+\]
+and $H^q(\PP^n_A,\Oo(d))=0$ for $0<q<n$; each $H^q(\PP^n_A,\Oo(d))$ is a
+finite free $A$-module. Reference: Stacks, Lemma 30.8.1, tag~\stacks{01XS};
+Hartshorne, III.5.1.
+\lean{AlgebraicGeometry.cohomology\_projectiveSpace\_twist}
+\uses{thm:affine-vanishing, cor:affine-cover-computes, lem:proj-sections}
+\notready
+\end{theorem}
+
+\begin{proof}[Proof outline]
+The standard cover $\{D_+(T_i)\}$ is affine with affine intersections, so by
+Corollary~\ref{cor:affine-cover-computes} the cohomology is that of the
+\v{C}ech complex $\Cech^\bullet(\{D_+(T_i)\},\Oo(d))$. This complex is, in each
+graded piece, an explicit Koszul-type complex of localisations of the
+polynomial ring; a direct computation of its cohomology gives $H^0$ (degree
+$d$ polynomials), $H^n$ (the stated ``dual'' piece), and vanishing in
+between. Finiteness/freeness over $A$ is read off the monomial bases. Faithful
+to Stacks, tag~\stacks{01XS}.
+\end{proof}
+
+\begin{corollary}[Finiteness and Serre vanishing on $\PP^n$]\label{cor:Pn-finite-vanish}
+$H^q(\PP^n_A,\Oo(d))$ is a finite $A$-module for all $q,d$, and vanishes for
+$q>0$ and $d\gg 0$.
+\lean{AlgebraicGeometry.cohomology\_projectiveSpace\_finite\_and\_vanishing}
+\uses{thm:cohomology-Pn}
+\notready
+\end{corollary}
+
+\chapter{Serre finiteness and vanishing on Proj}\label{chap:serre-proj}
+
+\begin{lemma}[Affine finiteness, projective case]\label{lem:affine-finite-proj}
+Let $A$ be Noetherian and $X=\Proj S$ projective over $\Spec A$ (with $S$ as in
+Proposition~\ref{prop:proj-graded}), $\Ff$ coherent. Then $H^i(X,\Ff)$ is a
+finite $A$-module for all $i$, and $H^i(X,\Ff(d))=0$ for $i>0$, $d\gg 0$;
+moreover $\Ff(d)$ is globally generated for $d\gg 0$. Reference: Stacks, Lemma
+30.15.2 and Section 30.15, tag~\stacks{01YW}; Hartshorne, III.5.2.
+\lean{AlgebraicGeometry.Proj.cohomology\_coherent\_finite\_and\_vanishing}
+\uses{thm:cohomology-Pn, prop:proj-graded, def:coherent}
+\notready
+\end{lemma}
+
+\begin{proof}[Proof outline]
+Write $\Ff=\widetilde M$ (Proposition~\ref{prop:proj-graded}) and present $M$
+as a quotient of a finite free graded module; this yields a finite resolution
+of $\Ff$ by finite direct sums of twists $\Oo_X(a_j)$ up to a coherent kernel,
+and $H^\bullet$ of each such sum is finite over $A$ by
+Theorem~\ref{thm:cohomology-Pn}. Descending induction on the (finite)
+cohomological amplitude, using the long exact sequence
+(Lemma~\ref{lem:les}), gives finiteness of $H^i(X,\Ff)$ and, after twisting by
+$\Oo(d)$ with $d\gg0$, the vanishing and global generation. Faithful to Stacks,
+tag~\stacks{01YW}.
+\end{proof}
+
+%##############################################################################
+\part{Coherent sheaves}\label{part:coherent}
+%##############################################################################
+
+References: Stacks, Sections 30.9, 30.11, 30.12 \cite{stacks}; Hartshorne, II.5
+\cite{Hartshorne}.
+
+\chapter{Coherence on locally Noetherian schemes}\label{chap:coherent}
+
+\begin{definition}[Coherent module]\label{def:coherent}
+An $\Oo_X$-module $\Ff$ is \emph{coherent} if it is of finite type and, for
+every open $U$ and every morphism $\Oo_U^{\,m}\to\Ff|_U$, the kernel is of
+finite type. Reference: Stacks, tag~\stacks{01BU}.
+\lean{AlgebraicGeometry.Scheme.Modules.IsCoherent}
+\uses{}
+\notready
+\end{definition}
+
+\begin{lemma}[Locally Noetherian source]\label{lem:X-noeth}
+If $f\colon X\to S$ is of finite type and $S$ is locally Noetherian, then $X$
+is locally Noetherian. In particular a proper $f$ over locally Noetherian $S$
+has locally Noetherian source. Reference: Stacks, Lemma 29.15.6,
+tag~\stacks{01T6}.
+\lean{AlgebraicGeometry.locallyNoetherian\_of\_finiteType}
+\mathlibpartial
+\end{lemma}
+
+\begin{lemma}[Coherence on locally Noetherian schemes]\label{lem:coherent-noeth}
+On a locally Noetherian scheme $X$, an $\Oo_X$-module is coherent iff it is
+quasi-coherent and of finite type. Reference: Stacks, Lemma 30.9.1,
+tag~\stacks{01XZ}.
+\lean{AlgebraicGeometry.Scheme.Modules.isCoherent\_iff\_qcoh\_finiteType}
+\uses{def:coherent, def:qcoh}
+\notready
+\end{lemma}
+
+\begin{lemma}[Finite presentation $=$ coherence]\label{lem:fp-iff-coh}
+On a locally Noetherian scheme, an $\Oo_X$-module is of finite presentation
+(in the sense of \texttt{SheafOfModules.IsFinitePresentation}) iff it is
+coherent. Reference: Stacks, tag~\stacks{01XZ} together with
+tag~\stacks{01BN}.
+\lean{AlgebraicGeometry.Scheme.Modules.isFinitePresentation\_iff\_isCoherent}
+\uses{lem:coherent-noeth, lem:qcoh-agree}
+\notready
+\end{lemma}
+
+\begin{proposition}[Coherent sheaves form a Serre--abelian subcategory]\label{prop:coherent-abelian}
+On a locally Noetherian scheme, kernels, cokernels, images and extensions of
+coherent sheaves are coherent; in a short exact sequence, if two terms are
+coherent so is the third. Reference: Stacks, Lemmas 30.9.2, 30.9.3,
+tags~\stacks{01Y0}, \stacks{01Y1}.
+\lean{AlgebraicGeometry.Scheme.Modules.isCoherent\_of\_ses}
+\uses{def:coherent, lem:coherent-noeth, prop:qcoh-abelian}
+\notready
+\end{proposition}
+
+\chapter{Closed immersions and support}\label{chap:closed-support}
+
+\begin{lemma}[Pushforward along a closed immersion]\label{lem:closed-immersion-acyclic}
+Let $i\colon Z\to X$ be a closed immersion of locally Noetherian schemes and
+$\Gg$ a coherent $\Oo_Z$-module. Then $i_*\Gg$ is coherent, $i_*$ is exact, and
+$\Rr^p i_*\Gg=0$ for all $p>0$. Reference: Stacks, Lemma 30.9.9,
+tag~\stacks{01Y6}; Liu, 5.1.14(d) \cite{Liu}.
+\lean{AlgebraicGeometry.Scheme.closedImmersion\_pushforward\_coherent\_and\_acyclic}
+\uses{def:coherent, def:higher-direct-image, lem:flasque-acyclic}
+\notready
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+Coherence of $i_*\Gg$ is local and reduces to the affine statement that a
+finite module over $R/I$ is finite over $R$. Exactness and the vanishing of
+$\Rr^p i_*$ for $p>0$ hold because $i$ is a homeomorphism onto a closed subset,
+so $i_*$ is exact on the underlying sheaves and $i_*$ of a flasque sheaf is
+flasque, hence acyclic (Lemma~\ref{lem:flasque-acyclic}). Faithful to Stacks,
+tag~\stacks{01Y6}.
+\end{proof}
+
+\begin{lemma}[Support and generic stalks]\label{lem:support}
+For a coherent $\Ff$ on a Noetherian scheme, $\Supp(\Ff)$ is closed; if
+$Z\subseteq X$ is integral closed with generic point $\xi$ then
+$\Oo_{X,\xi}=\kk(\xi)$ is a field, so any coherent $\Gg$ supported on $Z$ has
+$\Gg_\xi$ a finite-dimensional $\kk(\xi)$-vector space, and $\Gg_\xi$ is
+automatically annihilated by $\mathfrak m_\xi=0$. Reference: Stacks,
+tags~\stacks{01B4}, \stacks{01YB}.
+\lean{AlgebraicGeometry.Scheme.Modules.support\_closed, AlgebraicGeometry.Scheme.Modules.genericStalk\_finrank}
+\uses{def:coherent}
+\notready
+\end{lemma}
+
+%##############################################################################
+\part{Projective morphisms}\label{part:projmor}
+%##############################################################################
+
+References: Stacks, Sections 29.40 (ample), 30.16 \cite{stacks}; Hartshorne,
+II.7, III.8.8 \cite{Hartshorne}.
+
+\chapter{Ample invertible sheaves and projective morphisms}\label{chap:ample}
+
+\begin{definition}[Relatively ample; projective morphism]\label{def:projective-morphism}
+An invertible $\Oo_X$-module $\Ll$ is \emph{$f$-relatively ample} (for
+$f\colon X\to S$) if, locally on $S=\bigcup\Spec A_i$, $X_i\to\Spec A_i$ is
+isomorphic over $A_i$ to a locally closed immersion into some $\PP^{n_i}_{A_i}$
+pulling $\Oo(1)$ back to $\Ll$. A morphism $f\colon X\to S$ is
+\emph{projective} if it factors as a closed immersion $X\hookrightarrow\PP^n_S$
+followed by the projection (equivalently, admits an $f$-ample $\Ll$ with $f$
+proper). Reference: Stacks, Section 29.40, tag~\stacks{01VG}, and
+tag~\stacks{01W8}; Hartshorne, II.7.
+\lean{AlgebraicGeometry.Scheme.IsRelativelyAmple, AlgebraicGeometry.IsProjective}
+\uses{def:invertible}
+\notready
+\end{definition}
+
+\begin{lemma}[Pullback of $\Oo(1)$ is relatively ample]\label{lem:pullback-ample}
+If $i\colon X\to\PP^n_S$ is a closed immersion over $S$ then
+$i^*\Oo_{\PP^n_S}(1)$ is $f$-relatively ample, where $f\colon X\to S$;
+moreover $f$ is projective and proper. Reference: Stacks, Lemma 29.40.7,
+tag~\stacks{02NR}.
+\lean{AlgebraicGeometry.Scheme.relativelyAmple\_pullback\_twist}
+\uses{def:projective-morphism}
+\notready
+\end{lemma}
+
+\chapter{Higher direct images along projective morphisms}\label{chap:proj-hdi}
+
+\begin{lemma}[Graded finiteness along a projective morphism]\label{lem:graded-finiteness}
+Let $S$ be Noetherian affine, $f\colon X\to\Spec A$ projective with
+$f$-relatively ample $\Ll$, and $\Ff$ coherent. Then
+$\bigoplus_d H^p(X,\Ff\otimes\Ll^{\otimes d})$ is a finite graded module over
+the section ring, for each $p$; in particular each $H^p(X,\Ff)$ is a finite
+$A$-module and $H^p(X,\Ff\otimes\Ll^{\otimes d})=0$ for $p>0$, $d\gg 0$.
+Reference: Stacks, Lemma 30.16.1 and Lemma 30.19.3, tags~\stacks{02O0},
+\stacks{0897}.
+\lean{AlgebraicGeometry.Scheme.gradedCohomology\_finite\_projective}
+\uses{lem:affine-finite-proj, prop:proj-graded, def:projective-morphism}
+\notready
+\end{lemma}
+
+\begin{lemma}[Vanishing after a large relatively ample twist]\label{lem:proj-hdi-vanish}
+Let $S$ be Noetherian, $f\colon X\to S$ proper, $\Ll$ an $f$-relatively ample
+invertible sheaf, $\Ff$ coherent. Then there is $n_0$ with
+$\Rr^p f_*(\Ff\otimes\Ll^{\otimes n})=0$ for all $p>0$ and $n\ge n_0$.
+Reference: Stacks, Lemma 30.16.2, tag~\stacks{02O1}.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_vanishing\_relativelyAmple}
+\uses{lem:graded-finiteness, prop:hdi-affine-base, lem:hdi-sheafification}
+\notready
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+The statement is local on $S$ (Lemma~\ref{lem:hdi-sheafification}), so take
+$S=\Spec A$ Noetherian. By Proposition~\ref{prop:hdi-affine-base},
+$\Rr^p f_*(\Ff\otimes\Ll^{\otimes n})=\widetilde{H^p(X,\Ff\otimes
+\Ll^{\otimes n})}$, which vanishes for $p>0$, $n\gg0$ by the Serre vanishing in
+Lemma~\ref{lem:graded-finiteness}. Faithful to Stacks, tag~\stacks{02O1}.
+\end{proof}
+
+\begin{lemma}[Coherence in the projective case]\label{lem:proj-hdi-coherent}
+Let $S$ be locally Noetherian, $f\colon X\to S$ projective, $\Ff$ coherent.
+Then $\Rr^p f_*\Ff$ is coherent for all $p\ge 0$. Reference: Stacks, Lemma
+30.16.3, tag~\stacks{02O4}; Hartshorne, III.8.8.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_coherent\_of\_projective}
+\uses{lem:graded-finiteness, prop:hdi-affine-base, lem:coherent-noeth}
+\notready
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+Local on $S$, reduce to $S=\Spec A$ Noetherian; then
+$\Rr^p f_*\Ff=\widetilde{H^p(X,\Ff)}$
+(Proposition~\ref{prop:hdi-affine-base}), and $H^p(X,\Ff)$ is a finite
+$A$-module by Lemma~\ref{lem:graded-finiteness}/\ref{lem:affine-finite-proj},
+so $\Rr^p f_*\Ff$ is coherent (Lemma~\ref{lem:coherent-noeth}). Faithful to
+Stacks, tag~\stacks{02O4}.
+\end{proof}
+
+%##############################################################################
+\part{D\'evissage}\label{part:devissage}
+%##############################################################################
+
+References: Stacks, Section 30.12 \cite{stacks}.
+
+\chapter{D\'evissage of coherent sheaves}\label{chap:devissage}
+
+\begin{lemma}[Generation by pushforwards from integral subschemes]\label{lem:devissage-gen}
+Let $X$ be Noetherian and $\mathcal P$ a property of coherent sheaves that
+holds for $(Z\hookrightarrow X)_*\Ii$ for every integral closed
+$Z\subseteq X$ and every coherent ideal sheaf $\Ii\subseteq\Oo_Z$. Then
+$\mathcal P$ holds for all coherent sheaves. Reference: Stacks, Lemmas 30.12.4,
+30.12.5, tags~\stacks{01YG}, \stacks{01YH}.
+\lean{AlgebraicGeometry.Scheme.devissage\_generation}
+\uses{def:coherent, prop:coherent-abelian}
+\notready
+\end{lemma}
+
+\begin{theorem}[D\'evissage]\label{thm:devissage}
+Let $X$ be Noetherian and $\mathcal P$ a property of coherent
+$\Oo_X$-modules such that (1) in any short exact sequence, if two terms satisfy
+$\mathcal P$ so does the third; and (2) for every integral closed
+$Z\subseteq X$ with generic point $\xi$ there is a coherent $\Gg$ with
+$\Supp\Gg=Z$, $\dim_{\kk(\xi)}\Gg_\xi=1$, and $\mathcal P(\Gg)$. Then
+$\mathcal P$ holds for every coherent $\Oo_X$-module. Reference: Stacks, Lemma
+30.12.6, tag~\stacks{01YI}.
+\lean{AlgebraicGeometry.Scheme.coherent\_devissage}
+\uses{lem:devissage-gen, prop:coherent-abelian, lem:support}
+\notready
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+By Lemma~\ref{lem:devissage-gen} it suffices to treat
+$(Z\hookrightarrow X)_*\Ii$. If $\mathcal P$ failed for some such sheaf,
+Noetherian induction on the support gives a minimal integral closed $Z_0$ on
+which it fails, while it holds on every proper closed subscheme of $Z_0$;
+hypothesis (2) for $Z_0$ and the 2-out-of-3 property (1) applied to a suitable
+short exact sequence relating $\Ii$, $\Gg$ and sheaves supported on lower-dimensional
+closed subsets yield a contradiction. Faithful to Stacks, tag~\stacks{01YI}.
+\end{proof}
+
+%##############################################################################
+\part{Chow's lemma}\label{part:chow}
+%##############################################################################
+
+References: Stacks, Section 30.18 \cite{stacks}; EGA II, 5.6.1 \cite{EGA2}.
+
+\chapter{Chow's lemma}\label{chap:chow}
+
+\begin{theorem}[Chow's lemma]\label{thm:chow}
+Let $S$ be Noetherian and $f\colon X\to S$ separated of finite type. Then there
+exist $n$, a proper surjective $\pi\colon X'\to X$ that is an isomorphism over a
+dense open $U\subseteq X$, and an immersion $X'\hookrightarrow\PP^n_S$ over $S$.
+If $f$ is proper then $X'\to S$ is projective. Reference: Stacks, Lemma
+30.18.1, tag~\stacks{0200}.
+\lean{AlgebraicGeometry.chowLemma}
+\uses{def:projective-morphism}
+\notready
+\end{theorem}
+
+\begin{proof}[Proof outline]
+Cover $X$ by finitely many affine opens $U_i$ containing all generic points,
+so $U=\bigcap U_i$ is dense; embed each $U_i$ as a scheme-theoretically dense
+open of a closed subscheme $Z_i\subseteq\PP^{n_i}_S$. Let $Z$ be the
+scheme-theoretic image of $U\to\prod_S Z_i$; the projections give proper
+$p_i\colon Z\to Z_i$, and gluing the $p_i^{-1}(U_i)$ produces
+$\pi\colon X'\to X$ proper and surjective, an isomorphism over $U$, with $X'$
+placed in one $\PP^n_S$ by the Segre embedding. Faithful to Stacks,
+tag~\stacks{0200}.
+\end{proof}
+
+\begin{remark}[The graph is a closed immersion; ampleness]\label{rem:chow-graph}
+If $i\colon X'\to\PP^m_S$ is the immersion and $\pi\colon X'\to X$ proper, then
+$(i,\pi)\colon X'\to\PP^m_X$ is a closed immersion, so
+$\Ll:=i^*\Oo(1)\cong(i,\pi)^*\Oo_{\PP^m_X}(1)$ is $\pi$-relatively ample; and
+$X'\to S$ is projective. Reference: Stacks, Remark 30.18.2, tag~\stacks{0201};
+Lemma~\ref{lem:pullback-ample}.
+\lean{AlgebraicGeometry.chowLemma\_graph\_closedImmersion}
+\uses{thm:chow, lem:pullback-ample}
+\notready
+\end{remark}
+
+%##############################################################################
+\part{The finiteness theorem}\label{part:finiteness}
+%##############################################################################
+
+\chapter{Assembly}\label{chap:finiteness}
+
+\begin{theorem}[Coherence of higher direct images]\label{thm:finiteness}
+Let $S$ be locally Noetherian, $f\colon X\to S$ proper, $\Ff$ coherent. Then
+$\Rr^p f_*\Ff$ is coherent for all $p\ge 0$. Reference: Stacks, Proposition
+30.19.1, tag~\stacks{02O5}; EGA III, 3.2.1.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_coherent\_of\_isProper}
+\uses{thm:devissage, thm:chow, rem:chow-graph, lem:proj-hdi-coherent, lem:proj-hdi-vanish, lem:acyclic-pushforward, lem:closed-immersion-acyclic, prop:coherent-abelian, prop:hdi-qcoh, lem:X-noeth, lem:support}
+\notready
+\end{theorem}
+
+\begin{proof}
+Coherence of $\Rr^p f_*\Ff$ is local on $S$ (Lemma~\ref{lem:hdi-sheafification}
+and Proposition~\ref{prop:hdi-qcoh}), so assume $S$ Noetherian; then $X$ is
+Noetherian (Lemma~\ref{lem:X-noeth}). Put
+$\mathcal P(\Ff)\Leftrightarrow$ ``$\Rr^p f_*\Ff$ coherent for all $p$''.
+
+\emph{Hypothesis (1) of Theorem~\ref{thm:devissage}.} For a short exact
+sequence of coherent sheaves, the long exact sequence of the $\Rr^p f_*$
+(Lemma~\ref{lem:les}) places each $\Rr^p f_*$ of the third sheaf between two
+coherent terms; by Proposition~\ref{prop:coherent-abelian} (2-out-of-3) it is
+coherent. So $\mathcal P$ satisfies 2-out-of-3.
+
+\emph{Hypothesis (2).} Fix an integral closed $Z\subseteq X$ with generic
+point $\xi$, closed immersion $j\colon Z\to X$, and $g=f\circ j\colon Z\to S$.
+It suffices to produce coherent $\Gg$ on $Z$ with (a) $\dim_{\kk(\xi)}\Gg_\xi
+=1$ and (b) $\Rr^p g_*\Gg$ coherent for all $p$: then $\Ff_0:=j_*\Gg$ is
+coherent (Lemma~\ref{lem:closed-immersion-acyclic}), and since
+$\Rr^q j_*\Gg=0$ for $q>0$ the acyclic pushforward
+Lemma~\ref{lem:acyclic-pushforward} gives
+$\Rr^p f_*\Ff_0\cong\Rr^p(f\circ j)_*\Gg=\Rr^p g_*\Gg$, coherent by (b), so
+$\mathcal P(\Ff_0)$; and $\Supp\Ff_0=Z$, $(\Ff_0)_\xi=\Gg_\xi$ is
+$1$-dimensional, matching Theorem~\ref{thm:devissage}(2).
+
+Construct $\Gg$ by Chow's lemma (Theorem~\ref{thm:chow}) applied to
+$g\colon Z\to S$: a proper surjective $\pi\colon Z'\to Z$, isomorphism over a
+dense open $U\subseteq Z$, with $g'=g\circ\pi\colon Z'\to S$ projective and an
+invertible $\Ll$ on $Z'$ that is $\pi$-relatively ample
+(Remark~\ref{rem:chow-graph}). By Lemma~\ref{lem:proj-hdi-vanish} choose
+$n\ge1$ with $\Rr^q\pi_*\Ll^{\otimes n}=0$ for $q>0$, and set
+$\Gg=\pi_*\Ll^{\otimes n}$. Then:
+\begin{itemize}
+\item $\Gg$ is coherent, being $\pi_*\Ll^{\otimes n}=\Rr^0\pi_*\Ll^{\otimes n}$
+for the projective $\pi$ (Lemma~\ref{lem:proj-hdi-coherent});
+\item (a) holds: over $U$, $\pi$ is an isomorphism so
+$\Gg|_U=\Ll^{\otimes n}|_U$ is invertible, giving $\Supp\Gg=Z$ and
+$\dim_{\kk(\xi)}\Gg_\xi=1$ (Lemma~\ref{lem:support});
+\item (b) holds by Lemma~\ref{lem:acyclic-pushforward} applied to
+$Z'\xrightarrow{\pi}Z\xrightarrow{g}S$ with $\Bb=\Ll^{\otimes n}$: as
+$\Rr^q\pi_*\Ll^{\otimes n}=0$ for $q>0$,
+$\Rr^p g_*\Gg\cong\Rr^p g'_*\Ll^{\otimes n}$, coherent for all $p$ because
+$g'$ is projective (Lemma~\ref{lem:proj-hdi-coherent}).
+\end{itemize}
+
+By Theorem~\ref{thm:devissage}, $\mathcal P(\Ff)$ holds for all coherent
+$\Ff$. Only the single vanishing $\Rr^q\pi_*\Ll^{\otimes n}=0$ ($q>0$) is
+used, coherence being transported through
+Lemma~\ref{lem:acyclic-pushforward}; no spectral sequence appears
+(Remark~\ref{rem:no-ss}). Faithful to Stacks, tag~\stacks{02O5}.
+\end{proof}
+
+%##############################################################################
+\part{The target Lean statement}\label{part:bridge}
+%##############################################################################
+
+\chapter{From coherence to finite presentation}\label{chap:conclude}
+
+\begin{theorem}[Target]\label{thm:target-final}
+Let $f\colon X\to Y$ be proper, $Y$ locally Noetherian, $M$ an $\Oo_X$-module
+of finite presentation. Then for all $n$,
+$\bigl((\mathrm{Modules.pushforward}\,f).\mathrm{rightDerived}\,n\bigr)(M)$ is
+of finite presentation. This is Theorem~\ref{thm:goal}.
+\lean{AlgebraicGeometry.Scheme.rightDerivedPushforward\_isFinitePresentation\_of\_isProper}
+\uses{thm:finiteness, prop:bridge-rderived, lem:fp-iff-coh, lem:X-noeth}
+\notready
+\end{theorem}
+
+\begin{proof}
+$f$ proper $\Rightarrow$ of finite type, so $X$ is locally Noetherian
+(Lemma~\ref{lem:X-noeth}); by Lemma~\ref{lem:fp-iff-coh}, $M$ is coherent. By
+Proposition~\ref{prop:bridge-rderived} the derived object is $\Rr^n f_*M$,
+coherent by Theorem~\ref{thm:finiteness}; applying
+Lemma~\ref{lem:fp-iff-coh} on the locally Noetherian base $Y$ returns finite
+presentation.
+\end{proof}
+
+%##############################################################################
+\part{Cohomology and base change}\label{part:basechange}
+%##############################################################################
+
+\chapter{Cohomology and base change}\label{chap:basechange}
+
+References: D.~Mumford, \emph{Abelian Varieties}, \S II.5, p.~53; EGA III,
+7.7--7.9; Hartshorne, III.12; Stacks, tag~\stacks{0A1H}. This companion result
+(quoted as Theorem~0.1 of Buzzard's \emph{Explicit models for modular curves})
+is built on the same cohomological substrate as the coherence theorem
+(Part~\ref{part:cohomology}), together with relative flatness and fibrewise
+cohomology.
+
+\begin{definition}[Relative flatness and fibrewise cohomology]\label{def:flat-fiber}
+For $f\colon X\to Y$ and an $\Oo_X$-module $\Ff$, say $\Ff$ is \emph{flat over
+$Y$} if each stalk of $\Ff$ is flat over the corresponding local ring of $Y$,
+and that \emph{$H^n(X_y,\Ff_y)=0$} if the cohomology of the restriction of $\Ff$
+to the fibre $X_y$ vanishes in degree $n$, for every $y\in Y$.
+\lean{AlgebraicGeometry.Scheme.Modules.FlatOver, AlgebraicGeometry.Scheme.Modules.FiberCohomologyVanishes}
+\uses{def:coherent, def:higher-direct-image}
+\notready
+\end{definition}
+
+\begin{theorem}[Cohomology and base change; Mumford, \emph{Ab.\ Var.}\ p.~53]\label{thm:base-change}
+Let $f\colon X\to Y$ be a proper morphism, $Y$ affine, and $\Ff$ a coherent
+$\Oo_X$-module that is flat over $Y$. If, for some $n$, $H^n(X_y,\Ff_y)=0$ for
+all $y\in Y$, then $\Rr^{n-1}f_*\Ff$ commutes with all base changes.
+\lean{AlgebraicGeometry.Scheme.higherDirectImage\_commutesWithBaseChange\_of\_fiberVanishing}
+\uses{def:flat-fiber, def:higher-direct-image, thm:finiteness, lem:hdi-sheafification}
+\notready
+\end{theorem}
+
+\begin{remark}
+The proof (Mumford, \emph{loc.\ cit.}) studies the complex of $A$-modules
+computing $\Rr^\bullet f_*\Ff$ over $Y=\Spec A$ and applies the exchange/base-change
+criterion: fibrewise vanishing in degree $n$ forces the relevant boundary map to
+be surjective, whence $\Rr^{n-1}f_*$ is right exact and its formation commutes
+with base change. This uses the finiteness Theorem~\ref{thm:finiteness} to keep
+the complex in coherent modules.
+\end{remark}
+
+%##############################################################################
+\part{Dependency graph, critical path, and work packages}\label{part:summary}
+%##############################################################################
+
+\chapter{Critical path and packaging}
+
+\section{Critical path to Theorem~\ref{thm:finiteness}}
+\[
+\begin{aligned}
+&\text{Ch.\ref{chap:tilde} tilde} \Rightarrow \text{Ch.\ref{chap:qcoh} QCoh}
+\Rightarrow \text{Ch.\ref{chap:cohomology-def} cohomology} \\
+&\Rightarrow \text{Ch.\ref{chap:cech}--\ref{chap:affine-vanishing} \v{C}ech + affine vanishing}
+\Rightarrow \text{Ch.\ref{chap:hdi-qcoh} qcoh of }\Rr^i f_* \\
+&\Rightarrow \text{Ch.\ref{chap:cohomology-Pn} coh of }\PP^n
+\Rightarrow \text{Ch.\ref{chap:proj-hdi} projective case} \\
+&\text{and independently Ch.\ref{chap:flasque} flasque, Ch.\ref{chap:devissage} d\'evissage, Ch.\ref{chap:chow} Chow} \\
+&\Rightarrow \text{Ch.\ref{chap:finiteness} finiteness} \Rightarrow \text{Ch.\ref{chap:conclude} target.}
+\end{aligned}
+\]
+
+\section{Suggested work packages (parallelisable)}
+\begin{description}[leftmargin=1.4em]
+\item[WP1 Affine QCoh.] Ch.\ref{chap:tilde}--\ref{chap:qcoh}: complete the
+$\widetilde{(-)}$ API in \texttt{Modules.Tilde}, the affine equivalence, and
+the geometric quasi-coherence predicate. Prerequisite for everything.
+\item[WP2 Cohomology core.] Ch.\ref{chap:cohomology-def}--\ref{chap:flasque}:
+$H^i$, $\Rr^i f_*$, $\delta$-functor structure, sheafification description,
+and the flasque package. Independent of WP1 except
+Lemma~\ref{lem:hdi-sheafification}.
+\item[WP3 \v{C}ech + vanishing.] Ch.\ref{chap:cech}--\ref{chap:hdi-qcoh}:
+needs WP1 and WP2; yields Serre vanishing, affine-cover computation, and
+quasi-coherence of $\Rr^i f_*$.
+\item[WP4 Projective space.] Ch.\ref{chap:proj-twist}--\ref{chap:serre-proj}:
+needs WP3; the twisting sheaves and Theorem~\ref{thm:cohomology-Pn}.
+\item[WP5 Coherence.] Ch.\ref{chap:coherent}--\ref{chap:closed-support}:
+needs WP1; the coherence predicate, finite-presentation equivalence, closed
+immersions, support.
+\item[WP6 Projective morphisms.] Ch.\ref{chap:ample}--\ref{chap:proj-hdi}:
+needs WP4, WP5.
+\item[WP7 D\'evissage.] Ch.\ref{chap:devissage}: needs WP5. Parallel to WP6.
+\item[WP8 Chow.] Ch.\ref{chap:chow}: needs scheme-theoretic image and Segre;
+largely independent morphism-theory package.
+\item[WP9 Assembly + bridge.] Ch.\ref{chap:finiteness}--\ref{chap:conclude}:
+needs WP2 (flasque/acyclic pushforward and Prop.\ref{prop:bridge-rderived}),
+WP6, WP7, WP8.
+\end{description}
+
+\section{Largest single items}
+By anticipated effort: Theorem~\ref{thm:affine-vanishing} (Serre vanishing on
+affines) and the \v{C}ech comparison (WP3); Theorem~\ref{thm:cohomology-Pn}
+(explicit cohomology of $\PP^n$, WP4); Theorem~\ref{thm:chow} (Chow's lemma,
+WP8); and Proposition~\ref{prop:bridge-rderived} (the
+\texttt{rightDerived}/sheaf-cohomology comparison, WP2). None requires a
+spectral sequence.
+
+\section{Items closest to existing Mathlib}
+Lemma~\ref{lem:X-noeth}, Lemma~\ref{lem:pf-left-exact}, Lemma~\ref{lem:les}
+(via the \texttt{RightDerived} $\delta$-functor API), and the tilde
+sections/stalks (Lemma~\ref{lem:tilde-sections}) are the shortest to land,
+being extensions of declarations already present
+(Chapter~\ref{chap:baseline}).
+
+\begin{thebibliography}{9}
+\bibitem{EGA2} A.~Grothendieck, J.~Dieudonn\'e, EGA II, Publ.\ Math.\ IH\'ES 8
+(1961), Th\'eor\`eme 5.6.1 (Chow's lemma).
+\bibitem{EGA3} A.~Grothendieck, J.~Dieudonn\'e, EGA III, Publ.\ Math.\ IH\'ES 11
+(1961), Th\'eor\`eme 3.2.1.
+\bibitem{Hartshorne} R.~Hartshorne, Algebraic Geometry, GTM 52, Springer, 1977,
+Chapters II.5--7, III.1--5, III.8.
+\bibitem{Vakil} R.~Vakil, The Rising Sea: Foundations of Algebraic Geometry,
+\S18.9.
+\bibitem{Serre-FAC} J.-P.~Serre, Faisceaux alg\'ebriques coh\'erents, Ann.\ of
+Math.\ 61 (1955), 197--278.
+\bibitem{Liu} Q.~Liu, Algebraic Geometry and Arithmetic Curves, Oxford, 2002,
+5.1.14.
+\bibitem{Note} Note on avoiding spectral sequences in EGA III.3.2.1 (attached).
+\bibitem{stacks} The Stacks Project Authors, The Stacks Project,
+\url{https://stacks.math.columbia.edu}: Ch.~26 (tag~\stacks{01HR}), Ch.~27
+(tag~\stacks{01M3}), Ch.~20 (tag~\stacks{01DW}), Ch.~30 (tag~\stacks{01X6});
+Prop.~30.19.1 (tag~\stacks{02O5}).
+\end{thebibliography}
+
+\end{document}
