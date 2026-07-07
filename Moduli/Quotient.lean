@@ -331,10 +331,241 @@ The proof packages:
 
 The global equivalence `MW ≃ [Spec A / VariableChange]` further needs quotient-stack CFG
 construction and FiberedFunctor API absent from Mathlib; see the module docstring. -/
+-- Helper: extract baseHom = 𝟙 R from a fiber morphism
+private lemma fiberHom_baseHom_eq_id
+    {R : CommRingCat.{u}} {XC : WeierstrassCurve R} {YC : WeierstrassCurve R}
+    {hXC : XC.IsElliptic} {hYC : YC.IsElliptic}
+    (fval : (⟨⟨R, XC⟩, hXC⟩ : MW) ⟶ ⟨⟨R, YC⟩, hYC⟩)
+    (fhomo : MWProj.IsHomLift (𝟙 (Opposite.op R)) fval) :
+    fval.hom.baseHom = 𝟙 R := by
+  have h : fval.hom.baseHom.op = 𝟙 (Opposite.op R) := by
+    have heq := @IsHomLift.eq_of_isHomLift _ _ _ _ MWProj
+        ⟨⟨R, XC⟩, hXC⟩ ⟨⟨R, YC⟩, hYC⟩ (𝟙 (Opposite.op R)) fval fhomo
+    simp only [MWProj, Functor.comp_map, proj_map, ObjectProperty.ι_map] at heq
+    exact heq.symm
+  simpa [Quiver.Hom.unop_op] using congr_arg Quiver.Hom.unop h
+
+set_option maxHeartbeats 800000 in
 noncomputable def MW_fiber_equiv_actionGroupoid (R : CommRingCat.{u}) :
     MWProj.Fiber (Opposite.op R) ≌
       CategoryTheory.ActionCategory (WeierstrassCurve.VariableChange R) (A →+* R) := by
-  sorry
+  refine CategoryTheory.Equivalence.mk ?_ ?_ ?_ ?_
+  · -- Forward functor F : Fiber (op R) ⥤ ActionCategory (VC R) (A →+* R)
+    -- Objects: X ↦ (fiberEquivAPoints X : ActionCategory ...)
+    -- Morphisms: f ↦ ⟨fval.hom.vc, proof⟩
+    exact
+      { obj := fun X => (fiberEquivAPoints X : ActionCategory _ _)
+        map := fun {X Y} f => by
+          obtain ⟨⟨⟨XB, XC⟩, hXC⟩, hX⟩ := X
+          obtain ⟨⟨⟨YB, YC⟩, hYC⟩, hY⟩ := Y
+          simp only [MWProj, Functor.comp_obj, proj_obj] at hX hY
+          obtain ⟨fval, fhomo⟩ := f
+          cases (Opposite.op_injective hX : XB = R)
+          cases (Opposite.op_injective hY : YB = R)
+          have hbase : fval.hom.baseHom = 𝟙 R := fiberHom_baseHom_eq_id fval fhomo
+          have hcond : fval.hom.vc • XC = YC := by
+            have h := fval.hom.cond
+            rw [hbase, CommRingCat.hom_id, WeierstrassCurve.map_id] at h
+            exact h
+          -- The action-groupoid hom condition: vc • (fiberEquivAPoints X).back = (fiberEquivAPoints Y).back
+          -- fiberEquivAPoints X = (ringHomEquivElliptic R).symm ⟨XC,hXC⟩ = fromEllipticCurve R XC
+          -- smulRingHom: vc • φ = (ringHomEquivElliptic R).symm (vc • ringHomEquivElliptic R φ)
+          -- so vc • (fromEllipticCurve R XC) = (ringHomEquivElliptic R).symm (vc • ⟨XC,hXC⟩)
+          --   = (ringHomEquivElliptic R).symm ⟨YC,hYC⟩ = fromEllipticCurve R YC  ✓
+          -- The ActionCategory hom condition: fval.hom.vc • (fiberEquivAPoints X) = fiberEquivAPoints Y
+          -- as A →+* R elements (ActionCategory.back extracts the A →+* R part)
+          refine ⟨fval.hom.vc, ?_⟩
+          -- Goal: fval.hom.vc • (fiberEquivAPoints X : ActionCategory _ _).back =
+          --       (fiberEquivAPoints Y : ActionCategory _ _).back
+          -- .back of a coerced element is the element itself:
+          show fval.hom.vc • (fiberEquivAPoints (⟨⟨⟨R, XC⟩, hXC⟩, rfl⟩ :
+              MWProj.Fiber (Opposite.op R)) : A →+* R) =
+              fiberEquivAPoints (⟨⟨⟨R, YC⟩, hYC⟩, rfl⟩ : MWProj.Fiber (Opposite.op R))
+          -- fiberEquivAPoints X = (ringHomEquivElliptic R).symm ⟨XC,hXC⟩
+          have hfX : fiberEquivAPoints (⟨⟨⟨R, XC⟩, hXC⟩, rfl⟩ : MWProj.Fiber (Opposite.op R)) =
+              (ringHomEquivElliptic R).symm ⟨XC, hXC⟩ := by
+            simp only [fiberEquivAPoints, Equiv.trans_apply, Equiv.coe_fn_mk,
+              Equiv.symm_symm, ringHomEquivElliptic]
+          have hfY : fiberEquivAPoints (⟨⟨⟨R, YC⟩, hYC⟩, rfl⟩ : MWProj.Fiber (Opposite.op R)) =
+              (ringHomEquivElliptic R).symm ⟨YC, hYC⟩ := by
+            simp only [fiberEquivAPoints, Equiv.trans_apply, Equiv.coe_fn_mk,
+              Equiv.symm_symm, ringHomEquivElliptic]
+          rw [hfX, hfY, smulRingHom_def, Equiv.apply_symm_apply]
+          congr 1
+          apply Subtype.ext
+          simp only [smulElliptic_val]
+          exact hcond
+        map_id := fun X => by
+          obtain ⟨⟨⟨XB, XC⟩, hXC⟩, hX⟩ := X
+          simp only [MWProj, Functor.comp_obj, proj_obj] at hX
+          cases (Opposite.op_injective hX : XB = R)
+          apply Subtype.ext
+          simp only [ActionCategory.id_val]
+          -- The identity fiber morphism has vc = 1
+          rfl
+        map_comp := fun {X Y Z} f g => by
+          obtain ⟨⟨⟨XB, XC⟩, hXC⟩, hX⟩ := X
+          obtain ⟨⟨⟨YB, YC⟩, hYC⟩, hY⟩ := Y
+          obtain ⟨⟨⟨ZB, ZC⟩, hZC⟩, hZ⟩ := Z
+          simp only [MWProj, Functor.comp_obj, proj_obj] at hX hY hZ
+          obtain ⟨fval, fhomo⟩ := f
+          obtain ⟨gval, ghomo⟩ := g
+          cases (Opposite.op_injective hX : XB = R)
+          cases (Opposite.op_injective hY : YB = R)
+          cases (Opposite.op_injective hZ : ZB = R)
+          have hbase_f : fval.hom.baseHom = 𝟙 R := fiberHom_baseHom_eq_id fval fhomo
+          apply Subtype.ext
+          simp only [ActionCategory.comp_val]
+          show (Hom.comp fval.hom gval.hom).vc = gval.hom.vc * fval.hom.vc
+          simp [Hom.comp, hbase_f, CommRingCat.hom_id,
+            WeierstrassCurve.VariableChange.map_id] }
+  · -- Backward functor G : ActionCategory (VC R) (A →+* R) ⥤ Fiber (op R)
+    -- Objects: p ↦ ⟨⟨⟨R, (ringHomEquivElliptic R p.back).val⟩, _⟩, rfl⟩
+    -- Morphisms: g ↦ ⟨ObjectProperty.homMk {baseHom := 𝟙 R, vc := g.val, cond := _}, lift_pf⟩
+    -- G_map_vc_eq: the variable change condition for G.map
+    have G_map_vc_eq : ∀ {p q : ActionCategory (WeierstrassCurve.VariableChange R) (A →+* R)}
+        (g : p ⟶ q),
+        (show WeierstrassCurve.VariableChange R from g.val) •
+          (ringHomEquivElliptic R p.back).val = (ringHomEquivElliptic R q.back).val := by
+      intro p q g
+      have hg2 : (show WeierstrassCurve.VariableChange R from g.val) • p.back = q.back := g.2
+      have h1 : ringHomEquivElliptic R
+          ((show WeierstrassCurve.VariableChange R from g.val) • p.back) =
+          ringHomEquivElliptic R q.back := congr_arg (ringHomEquivElliptic R) hg2
+      rw [smulRingHom_def, Equiv.apply_symm_apply] at h1
+      have h2 := congr_arg Subtype.val h1
+      simp only [smulElliptic_val] at h2
+      exact h2
+    exact
+      { obj := fun p =>
+          (⟨⟨⟨R, (ringHomEquivElliptic R p.back).val⟩,
+              (ringHomEquivElliptic R p.back).prop⟩, by simp [MWProj]⟩ :
+            MWProj.Fiber (Opposite.op R))
+        map := fun {p q} g =>
+          let Xsrc : MW := ⟨⟨R, (ringHomEquivElliptic R p.back).val⟩,
+                             (ringHomEquivElliptic R p.back).prop⟩
+          let Ytgt : MW := ⟨⟨R, (ringHomEquivElliptic R q.back).val⟩,
+                             (ringHomEquivElliptic R q.back).prop⟩
+          let φ_MW : Xsrc ⟶ Ytgt := ObjectProperty.homMk
+            { baseHom := 𝟙 R
+              vc := (show WeierstrassCurve.VariableChange R from g.val)
+              cond := by
+                rw [CommRingCat.hom_id, WeierstrassCurve.map_id]
+                exact G_map_vc_eq g }
+          ⟨φ_MW, by
+            have h : MWProj.map φ_MW = 𝟙 (Opposite.op R) := by
+              simp only [MWProj, Functor.comp_map, proj_map, ObjectProperty.ι_map,
+                φ_MW, ObjectProperty.homMk_hom]
+              -- proj.map φ_hom = φ_hom.baseHom.op = (𝟙 R).op = 𝟙 (op R)
+              rfl
+            rw [← h]; exact .map _⟩
+        map_id := fun p => by
+          apply Functor.Fiber.hom_ext
+          -- fiberInclusion.map (G.map (𝟙 p)) = ObjectProperty.homMk {baseHom:=𝟙R, vc:=1, ...}
+          -- fiberInclusion.map (𝟙 (G.obj p)) = 𝟙 (G.obj p).1 in MW
+          -- Both have baseHom = 𝟙 R and vc = 1; use ObjectProperty.hom_ext then Hom.ext
+          apply ObjectProperty.hom_ext
+          apply Hom.ext <;> rfl
+        map_comp := fun {p q r} fg gh => by
+          apply Functor.Fiber.hom_ext
+          apply ObjectProperty.hom_ext
+          apply Hom.ext
+          · -- baseHom: 𝟙 R ≫ 𝟙 R = 𝟙 R
+            simp only [Hom.comp_baseHom, Category.id_comp]
+          · -- vc: ↑gh * ↑fg = (↑gh).map (𝟙R).hom * ↑fg = ↑gh * ↑fg
+            simp only [Hom.comp_vc, CommRingCat.hom_id,
+              WeierstrassCurve.VariableChange.map_id, mul_one] }
+  · -- Unit iso: 𝟭 (Fiber) ≅ F ⋙ G
+    refine NatIso.ofComponents (fun X => ?_) (fun {X Y} f => ?_)
+    · -- (F ⋙ G).obj X = G.obj (F.obj X) = X
+      obtain ⟨⟨⟨XB, XC⟩, hXC⟩, hX⟩ := X
+      simp only [MWProj, Functor.comp_obj, proj_obj] at hX
+      cases (Opposite.op_injective hX : XB = R)
+      -- goal: (F ⋙ G).obj ⟨⟨⟨R,XC⟩,hXC⟩,rfl⟩ ≅ 𝟭 _ .obj ⟨⟨⟨R,XC⟩,hXC⟩,rfl⟩
+      apply eqToIso
+      -- goal: (F ⋙ G).obj ⟨⟨⟨R,XC⟩,hXC⟩,rfl⟩ = ⟨⟨⟨R,XC⟩,hXC⟩,rfl⟩
+      simp only [Functor.comp_obj, Functor.id_obj]
+      -- The key: fiberEquivAPoints X = (ringHomEquivElliptic R).symm ⟨XC,hXC⟩
+      -- and ringHomEquivElliptic R ((ringHomEquivElliptic R).symm ⟨XC,hXC⟩) = ⟨XC,hXC⟩
+      -- .back of (φ : ActionCategory) where φ is a coercion from X is just φ itself
+      have hfX : fiberEquivAPoints (⟨⟨⟨R, XC⟩, hXC⟩, rfl⟩ : MWProj.Fiber (Opposite.op R)) =
+          (ringHomEquivElliptic R).symm ⟨XC, hXC⟩ := by
+        simp only [fiberEquivAPoints, Equiv.trans_apply, Equiv.coe_fn_mk,
+          Equiv.symm_symm, ringHomEquivElliptic]
+      -- After simp, .back of coercion is the original element (definitionally)
+      -- So (F ⋙ G).obj X = G.obj (F.obj X)
+      -- G.obj uses ringHomEquivElliptic R p.back where p = F.obj X and p.back = fiberEquivAPoints X
+      -- ringHomEquivElliptic R (fiberEquivAPoints X)
+      --   = ringHomEquivElliptic R ((ringHomEquivElliptic R).symm ⟨XC,hXC⟩) = ⟨XC,hXC⟩
+      have heq : (ringHomEquivElliptic R (fiberEquivAPoints
+          (⟨⟨⟨R, XC⟩, hXC⟩, rfl⟩ : MWProj.Fiber (Opposite.op R)))).val = XC := by
+        rw [hfX, Equiv.apply_symm_apply]
+      -- (F ⋙ G).obj X and X as Fiber objects
+      -- After unfolding, G.obj (F.obj X) curve = ringHomEquivElliptic R (back of F.obj X) .val
+      -- = ringHomEquivElliptic R (fiberEquivAPoints X).val (since back of coercion is the element)
+      -- = XC
+      -- MW = ObjectProperty.FullSubcategory (a structure), Fiber is Subtype
+      -- Use ext to get to the obj component
+      ext
+      -- After ext: underlying Weierstrass objects must be equal
+      -- i.e., ⟨R, ring.val⟩ = ⟨R, XC⟩
+      show (⟨R, (ringHomEquivElliptic R (fiberEquivAPoints
+          (⟨⟨⟨R, XC⟩, hXC⟩, rfl⟩ : MWProj.Fiber (Opposite.op R)))).val⟩ : Weierstrass) =
+          ⟨R, XC⟩
+      congr 1
+      exact heq
+    · -- Naturality of unit iso
+      obtain ⟨⟨⟨XB, XC⟩, hXC⟩, hX⟩ := X
+      obtain ⟨⟨⟨YB, YC⟩, hYC⟩, hY⟩ := Y
+      simp only [MWProj, Functor.comp_obj, proj_obj] at hX hY
+      obtain ⟨fval, fhomo⟩ := f
+      cases (Opposite.op_injective hX : XB = R)
+      cases (Opposite.op_injective hY : YB = R)
+      have hbase_f : fval.hom.baseHom = 𝟙 R := fiberHom_baseHom_eq_id fval fhomo
+      simp only [Functor.id_map, Functor.comp_map, eqToIso_refl, Iso.refl_hom,
+        Category.id_comp, Category.comp_id]
+      apply Functor.Fiber.hom_ext
+      apply ObjectProperty.hom_ext
+      apply Hom.ext
+      · -- baseHom: G.map gives 𝟙 R; original has 𝟙 R after hbase_f
+        simp only [ObjectProperty.FullSubcategory.comp_hom, ObjectProperty.FullSubcategory.id_hom,
+          ObjectProperty.ι_map, Hom.comp_baseHom, Hom.id_baseHom, hbase_f,
+          Category.id_comp, Category.comp_id]
+      · -- vc: G.map (F.map f) has vc = fval.hom.vc (by construction)
+        simp only [ObjectProperty.FullSubcategory.comp_hom, ObjectProperty.FullSubcategory.id_hom,
+          ObjectProperty.ι_map, Hom.comp_vc, Hom.id_vc, CommRingCat.hom_id,
+          WeierstrassCurve.VariableChange.map_id, mul_one, one_mul]
+  · -- Counit iso: G ⋙ F ≅ 𝟭 (ActionCategory)
+    refine NatIso.ofComponents (fun p => ?_) (fun {p q} g => ?_)
+    · -- F.obj (G.obj p) = p
+      -- fiberEquivAPoints (G.obj p).back = (ringHomEquivElliptic R).symm (ringHomEquivElliptic R p.back)
+      -- = p.back, and p.back = p as ActionCategory elements
+      apply eqToIso
+      simp only [Functor.comp_obj, Functor.id_obj]
+      -- fiberEquivAPoints (G.obj p) = (ringHomEquivElliptic R).symm (ringHomEquivElliptic R p.back)
+      have hfe : fiberEquivAPoints (⟨⟨⟨R, (ringHomEquivElliptic R p.back).val⟩,
+          (ringHomEquivElliptic R p.back).prop⟩, by simp [MWProj]⟩ :
+          MWProj.Fiber (Opposite.op R)) = (ringHomEquivElliptic R).symm
+          (ringHomEquivElliptic R p.back) := by
+        simp only [fiberEquivAPoints, Equiv.trans_apply, Equiv.coe_fn_mk,
+          Equiv.symm_symm, ringHomEquivElliptic]
+      -- Apply back_coe to get p
+      have hback : (fiberEquivAPoints (⟨⟨⟨R, (ringHomEquivElliptic R p.back).val⟩,
+          (ringHomEquivElliptic R p.back).prop⟩, by simp [MWProj]⟩ :
+          MWProj.Fiber (Opposite.op R)) : ActionCategory _ _) = ↑p.back := by
+        rw [hfe, Equiv.symm_apply_apply]
+      rw [show (↑p.back : ActionCategory _ _) = p from ActionCategory.back_coe p] at hback
+      exact hback
+    · -- Naturality of counit iso
+      simp only [Functor.comp_map, Functor.id_map]
+      -- LHS: eqToHom _ ≫ F.map (G.map g) ≫ eqToHom _
+      -- F.map (G.map g).val = g.val by construction, so this is eqToHom ≫ g ≫ eqToHom
+      apply Subtype.ext
+      simp only [ActionCategory.comp_val, eqToHom_refl, id_comp, comp_id]
+      -- Goal: (F.map (G.map g)).val = g.val
+      -- (G.map g) has vc = g.val (constructed explicitly)
+      -- (F.map (G.map g)).val = (G.map g).val.hom.vc = g.val ✓
+      rfl
 
 end QuotientPresentation
 
