@@ -16,6 +16,8 @@ Formalisation following `moduli_ell_blueprint`. Milestones on current Mathlib:
   `[Spec A / G]` CFG-equivalence needs quotient-stack API not in Mathlib). —
   `Moduli/Quotient.lean`.
 -/
+import Moduli.CFG
+import Moduli.Substrate
 import Moduli.Weierstrass
 import Moduli.Fibered
 import Moduli.Moduli

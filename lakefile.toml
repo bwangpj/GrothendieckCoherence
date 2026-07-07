@@ -1,7 +1,7 @@
-name = "GrothendieckCoherence"
+name = "Moduli"
 version = "0.1.0"
 keywords = ["math"]
-defaultTargets = ["GrothendieckCoherence"]
+defaultTargets = ["Moduli"]
 
 [leanOptions]
 pp.unicode.fun = true # pretty-prints `fun a ↦ b`
@@ -15,4 +15,4 @@ scope = "leanprover-community"
 rev = "master"
 
 [[lean_lib]]
-name = "GrothendieckCoherence"
+name = "Moduli"
