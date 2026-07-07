@@ -1,0 +1,1428 @@
+\documentclass[11pt]{article}
+
+%==============================================================================
+%  A blueprint for the formalisation of the moduli stack of elliptic curves
+%  via fibered categories in Lean 4 / Mathlib.
+%
+%  The document is written so that it compiles standalone (the leanblueprint
+%  macros \lean, \leanok, \uses, \notready, \discussion are defined below as
+%  no-ops or lightweight markers).  To use it inside a genuine `leanblueprint'
+%  project, delete the "STANDALONE SHIMS" block and let plastexdepgraph supply
+%  the real definitions.
+%==============================================================================
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{stmaryrd}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=green!45!black,
+            urlcolor=blue!55!black}
+
+%---------------------------- STANDALONE SHIMS --------------------------------
+\newcommand{\lean}[1]{\par\smallskip\noindent{\footnotesize\texttt{Lean:\ #1}}\par}
+\newcommand{\leanok}{{\footnotesize\textcolor{green!50!black}{\ [in Mathlib / formalised]}}}
+\newcommand{\uses}[1]{}
+\newcommand{\notready}{{\footnotesize\textcolor{red!60!black}{\ [not ready]}}}
+\newcommand{\discussion}[1]{}
+%------------------------------------------------------------------------------
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{construction}[definition]{Construction}
+\newtheorem{convention}[definition]{Convention}
+\newtheorem{notation}[definition]{Notation}
+\theoremstyle{plain}
+\newtheorem{lemma}[definition]{Lemma}
+\newtheorem{proposition}[definition]{Proposition}
+\newtheorem{theorem}[definition]{Theorem}
+\newtheorem{corollary}[definition]{Corollary}
+\theoremstyle{remark}
+\newtheorem{remark}[definition]{Remark}
+\newtheorem{warning}[definition]{Warning}
+
+\newcommand{\Aff}{\mathrm{Aff}}
+\newcommand{\CRing}{\mathrm{CommRing}}
+\newcommand{\CRingCat}{\mathbf{CommRingCat}}
+\newcommand{\Sch}{\mathrm{Sch}}
+\newcommand{\Cat}{\mathbf{Cat}}
+\newcommand{\Grpd}{\mathbf{Grpd}}
+\newcommand{\Spec}{\operatorname{Spec}}
+\newcommand{\op}{\mathrm{op}}
+\newcommand{\Weier}{\mathcal{W}}
+\newcommand{\Ell}{\mathcal{E}\!\ell\!\ell}
+\newcommand{\MW}{\mathcal{M}^{\mathrm{W}}_{1,1}}
+\newcommand{\Mss}{\mathcal{M}_{1,1}}
+\newcommand{\VC}{\mathrm{VC}}
+\newcommand{\Isom}{\underline{\mathrm{Isom}}}
+\newcommand{\Gm}{\mathbb{G}_{\mathrm m}}
+\newcommand{\Ga}{\mathbb{G}_{\mathrm a}}
+\newcommand{\id}{\mathrm{id}}
+\newcommand{\Hom}{\operatorname{Hom}}
+\newcommand{\map}{\mathrm{map}}
+\newcommand{\isEll}{\mathtt{IsElliptic}}
+\newcommand{\isHomLift}{\mathtt{IsHomLift}}
+\newcommand{\isCart}{\mathtt{IsCartesian}}
+\newcommand{\isSCart}{\mathtt{IsStronglyCartesian}}
+\newcommand{\isFib}{\mathtt{IsFibered}}
+\newcommand{\onel}{\mathbf 1}
+\renewcommand{\hom}{\longrightarrow}
+
+\title{\bfseries A blueprint for the moduli stack of elliptic curves\\
+       via fibered categories in Mathlib}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We give a detailed blueprint for the formalisation, in Lean~4/Mathlib, of the
+moduli stack of elliptic curves through the language of fibered categories.
+The construction proceeds in five parts.  Part~\ref{sec:substrate} records the
+Mathlib substrate.  Part~\ref{sec:base} fixes the base site (affine schemes with
+the fppf topology).  Part~\ref{sec:weier} builds the fibered category
+$\Weier\to\Aff$ of Weierstrass curves out of the existing
+\texttt{WeierstrassCurve} and \texttt{WeierstrassCurve.VariableChange} API, and
+proves that its projection is fibered in groupoids.  Part~\ref{sec:moduli}
+extracts the full subcategory $\MW$ of elliptic objects and records the quotient
+presentation $\MW\simeq[\Spec A/G]$ with
+$A=\mathbb Z[a_1,a_2,a_3,a_4,a_6][\Delta^{-1}]$ and $G=\Ga^3\rtimes\Gm$.
+Part~\ref{sec:descent} isolates the descent (stack) condition and reduces it to
+faithfully flat descent statements, several of which are not yet in Mathlib.
+Part~\ref{sec:comparison} compares $\MW$ with the geometric stack $\Mss$ of
+proper smooth genus-one curves with a section and states the comparison theorem,
+whose hypotheses expose the scheme-theoretic prerequisites still missing from
+Mathlib.  A milestone ladder (Part~\ref{sec:ladder}) orders the work by
+Mathlib-readiness.
+
+\medskip\noindent\emph{Correctness note.}  Throughout, declarations already
+present in Mathlib are marked \leanok\ and annotated with their module path; all
+other items are targets.  Every nontrivial target carries an explicit list of
+its prerequisites via \texttt{\textbackslash uses}, so that the dependency graph
+is complete.
+\end{abstract}
+
+\tableofcontents
+
+%==============================================================================
+\section{Conventions and the Mathlib substrate}\label{sec:substrate}
+%==============================================================================
+
+\begin{convention}\label{conv:univ}
+We work with Grothendieck universes as Mathlib does.  A \emph{category} means a
+term of \texttt{CategoryTheory.Category.\{v,u\}}; morphisms are written
+$X\hom Y$, composition $f\gg g$ (``$f$ then $g$''), identities $\onel_X$.
+Opposite categories are $\mathcal C^{\op}$.  For a functor $p:\mathcal X\to\mathcal S$
+we call $\mathcal S$ the \emph{base} and $\mathcal X$ the \emph{total category}.
+\end{convention}
+
+\begin{convention}[Rings and affine schemes]\label{conv:aff}
+$\CRingCat$ is the category of commutative rings
+(\texttt{Mathlib.Algebra.Category.Ring.Basic}).  We set
+$\Aff\coloneqq\CRingCat^{\op}$ and identify it with the category of affine
+schemes; an object of $\Aff$ is a ring $R$ (written $\Spec R$ when the geometric
+reading is intended), and a morphism $\Spec R\to\Spec R'$ in $\Aff$ is a ring
+homomorphism $f\colon R'\to R$, denoted $\underline f$ when regarded as an arrow
+of $\Aff$.  \emph{Base change} along $\underline f$ is application of $f$.
+\lean{CommRingCat}\leanok
+\end{convention}
+
+\subsection{The fibered-category API in Mathlib}
+
+The following are present in \texttt{Mathlib.CategoryTheory.FiberedCategory.*};
+we recall the interface we will use.
+
+\begin{definition}[Lift of a morphism]\label{def:homlift}
+For $p:\mathcal X\to\mathcal S$, objects $a,b\in\mathcal X$ over $R,S\in\mathcal S$
+(i.e.\ $p(a)=R$, $p(b)=S$), a base arrow $f:R\to S$ and $\varphi:a\hom b$, the
+proposition $p.\isHomLift\,f\,\varphi$ asserts that $p(\varphi)=f$ modulo the
+equalities $p(a)=R$, $p(b)=S$ (implemented with \texttt{eqToHom}).
+\lean{CategoryTheory.Functor.IsHomLift}\leanok
+\end{definition}
+
+\begin{definition}[Cartesian and strongly cartesian morphisms]\label{def:cartesian}
+With notation as in Definition~\ref{def:homlift} and $\varphi$ a lift of
+$f:R\to S$:
+\begin{enumerate}[label=(\alph*)]
+\item $\varphi$ is \emph{cartesian} ($p.\isCart\,f\,\varphi$) if for every
+$a'\in\mathcal X$ over $R$ and every $\psi:a'\hom b$ lifting $f$ there is a
+unique vertical $\chi:a'\hom a$ (a lift of $\onel_R$) with $\chi\gg\varphi=\psi$.
+\item $\varphi$ is \emph{strongly cartesian} ($p.\isSCart\,f\,\varphi$) if for
+every $a'\in\mathcal X$, every $g:p(a')\to R$ and every $\psi:a'\hom b$ lifting
+$f\circ g$ there is a unique $\chi:a'\hom a$ lifting $g$ with
+$\chi\gg\varphi=\psi$.
+\end{enumerate}
+\lean{CategoryTheory.Functor.IsCartesian, CategoryTheory.Functor.IsStronglyCartesian}\leanok
+\end{definition}
+
+\begin{lemma}[Basic API for (strongly) cartesian morphisms]\label{lem:scart-api}
+Strongly cartesian morphisms are stable under composition; a strongly cartesian
+morphism lifting an isomorphism is an isomorphism; two strongly cartesian lifts
+of the same arrow with the same target are related by a unique vertical
+isomorphism of their sources.  All three are available in Mathlib.
+\lean{CategoryTheory.Functor.IsStronglyCartesian.comp,
+      CategoryTheory.Functor.IsStronglyCartesian.isIso\_of\_base\_isIso,
+      CategoryTheory.Functor.IsStronglyCartesian.domainUniqueUpToIso}\leanok
+\uses{def:cartesian}
+\end{lemma}
+
+\begin{definition}[Fibered functor]\label{def:isfibered}
+$p:\mathcal X\to\mathcal S$ is \emph{prefibered} ($p.\mathtt{IsPreFibered}$) if
+for every $f:R\to S$ in $\mathcal S$ and every $b$ over $S$ there is a strongly
+cartesian $\varphi:a\hom b$ lifting $f$; it is \emph{fibered}
+($p.\isFib$) if in addition strongly cartesian morphisms are stable under
+composition (automatic from Lemma~\ref{lem:scart-api}).  Mathlib packages the
+prefibered pullback as \texttt{pullbackObj} and \texttt{pullbackMap}.
+\lean{CategoryTheory.Functor.IsPreFibered, CategoryTheory.Functor.IsFibered,
+      CategoryTheory.Functor.pullbackObj, CategoryTheory.Functor.pullbackMap}\leanok
+\uses{def:cartesian,lem:scart-api}
+\end{definition}
+
+\begin{definition}[Fibre categories]\label{def:fiber}
+For $S\in\mathcal S$, $p.\mathtt{Fiber}\,S$ is the subtype
+$\{a:\mathcal X\mid p(a)=S\}$, made a category with morphisms the vertical
+morphisms (lifts of $\onel_S$).  The inclusion $\mathtt{fiberInclusion}$ into
+$\mathcal X$ is faithful, and every $\varphi$ in the fibre satisfies
+$p.\isHomLift\,\onel_S\,\varphi$.
+\lean{CategoryTheory.Functor.Fiber, CategoryTheory.Functor.Fiber.fiberInclusion}\leanok
+\uses{def:homlift}
+\end{definition}
+
+\begin{definition}[Fibered in groupoids]\label{def:cfg}
+A fibered functor $p$ is \emph{fibered in groupoids} (a \emph{CFG}) when every
+morphism of $\mathcal X$ is strongly cartesian; equivalently every fibre
+$p.\mathtt{Fiber}\,S$ is a groupoid and $p$ is prefibered.  The equivalence of
+the two formulations is standard \cite[Def.~3.21, \S3.6]{FGA} and is the target
+lemma \texttt{isFibered\_iff\_fibers\_groupoid} below (see
+Proposition~\ref{prop:cfg-criterion}).
+\uses{def:isfibered,def:fiber}
+\end{definition}
+
+\begin{remark}[The Grothendieck and CoGrothendieck constructions]\label{rem:grothendieck}
+Mathlib (\texttt{Mathlib.CategoryTheory.Bicategory.Grothendieck}) provides two
+Grothendieck constructions for a pseudofunctor valued in $\Cat$
+\cite{Vistoli2008}.  For a covariant
+$F:\mathtt{LocallyDiscrete}\,\mathcal S\to\Cat$ it provides $\int F$
+(\texttt{Pseudofunctor.Grothendieck}), whose objects are pairs $(S,a)$ with
+$a\in F(S)$ and whose morphisms $(R,b)\to(S,a)$ are pairs $(f,h)$ with
+$f:R\to S$ in $\mathcal S$ and $h:F(f)(a)\to b$.  For a contravariant
+$F:\mathtt{LocallyDiscrete}\,\mathcal S^{\op}\to\Cat$ it provides
+$\int^{\mathrm c}\!F$ (\texttt{Pseudofunctor.CoGrothendieck}), whose objects are
+pairs $(S,a)$ with $a\in F(S)$ and whose morphisms $(R,b)\to(S,a)$ are pairs
+$(f,h)$ with $f:R\to S$ in $\mathcal S$ and $h:b\to F(f)(a)$, together with the
+projection $\mathtt{forget}\,F:\int^{\mathrm c}\!F\to\mathcal S$,
+$(S,a)\mapsto S$, $(f,h)\mapsto f$.  The Mathlib naming convention reserves
+\emph{Grothendieck} for the covariant construction and \emph{CoGrothendieck} for
+the contravariant one, consistent with \texttt{CategoryTheory.Grothendieck} for
+$1$-functors.  The moduli problem is contravariant in $\mathcal S=\Aff$, so the
+relevant construction is $\int^{\mathrm c}\!F$; see
+Construction~\ref{con:pseudofunctor}.
+\lean{CategoryTheory.Pseudofunctor.Grothendieck, CategoryTheory.Pseudofunctor.CoGrothendieck}\leanok
+\end{remark}
+
+\begin{proposition}[The CoGrothendieck construction is a fibered category]\label{prop:cogroth-fibered}
+For $F:\mathtt{LocallyDiscrete}\,\mathcal S^{\op}\to\Cat$ the projection
+$\mathtt{forget}\,F:\int^{\mathrm c}\!F\to\mathcal S$ is a fibered category:
+\begin{enumerate}[label=(\alph*)]
+\item for $f:R\to S$ in $\mathcal S$ and $a\in F(S)$, the arrow
+$\mathtt{cartesianLift}\,a\,f$ with domain $(R,\,F(f)(a))$ is strongly cartesian;
+\item $\mathtt{forget}\,F$ carries an \texttt{IsFibered} instance;
+\item $\mathtt{forget}\,F$ carries a \texttt{HasFibers} instance whose fibre over
+$S$ is $F(S)$, and the induced functor
+$F(S)\to(\mathtt{forget}\,F).\mathtt{Fiber}\,S$ is an equivalence.
+\end{enumerate}
+All three are established in
+\texttt{Mathlib.CategoryTheory.FiberedCategory.Grothendieck} (using
+\texttt{FiberedCategory.HasFibers}).
+\lean{CategoryTheory.Pseudofunctor.CoGrothendieck.isStronglyCartesian\_homCartesianLift,
+      CategoryTheory.Pseudofunctor.CoGrothendieck.instIsFiberedForget,
+      CategoryTheory.Pseudofunctor.CoGrothendieck.instHasFibersForget}\leanok
+\uses{rem:grothendieck,def:isfibered,def:fiber}
+\end{proposition}
+
+\subsection{Sites and sheaves in Mathlib}
+
+\begin{definition}[Grothendieck topology, sheaf]\label{def:site}
+Mathlib has sieves, Grothendieck topologies (maximality, stability under
+pullback, transitivity), pretopologies, coverages, the sheaf condition for
+presheaves valued in an arbitrary category, sheafification for suitable targets,
+and the comparison lemma between pretopologies and topologies.
+\lean{CategoryTheory.GrothendieckTopology, CategoryTheory.Pretopology,
+      CategoryTheory.Sieve, CategoryTheory.Presheaf.IsSheaf,
+      CategoryTheory.Sheaf}\leanok
+\end{definition}
+
+\begin{warning}[Stacks are not in Mathlib]\label{warn:no-stacks}
+As of the reference commit, Mathlib contains \emph{sheaf} theory (a $1$-truncated
+descent theory) but no notion of \emph{stack} (descent for a fibered category),
+no stackification, and no fppf/étale topology on schemes as a named object.  All
+of Part~\ref{sec:descent} that concerns descent \emph{of objects} is therefore
+new content.  This is the principal gap between the present blueprint and a
+finished formalisation.
+\end{warning}
+
+\subsection{The elliptic-curve API in Mathlib}\label{ss:ecapi}
+
+\begin{definition}[Weierstrass curve]\label{def:weier}
+For $R:\CRing$, $\texttt{WeierstrassCurve}\,R$ is the five-tuple
+$(a_1,a_2,a_3,a_4,a_6)\in R^5$.  Derived quantities $b_2,b_4,b_6,b_8$,
+$c_4,c_6$, and the discriminant $\Delta$ are defined, with
+$c_4^3-c_6^2=1728\,\Delta$ and $\Delta=(-b_2^2b_8-8b_4^3-27b_6^2+9b_2b_4b_6)$.
+Base change along $f\colon R\to A$ is $W.\map\,f:\texttt{WeierstrassCurve}\,A$,
+obtained by applying $f$ to each coefficient.
+\lean{WeierstrassCurve, WeierstrassCurve.Delta, WeierstrassCurve.map}\leanok
+\end{definition}
+
+\begin{lemma}[Functoriality of base change]\label{lem:map-func}
+$W.\map\,(\mathrm{RingHom.id}\,R)=W$ and
+$(W.\map\,f).\map\,g=W.\map\,(g\circ f)$; moreover
+$(W.\map\,f).\Delta=f(W.\Delta)$ and likewise for $b_i,c_4,c_6$.  Injectivity of
+$W\mapsto W.\map\,f$ for injective $f$ is \texttt{map\_injective}.
+\lean{WeierstrassCurve.map\_id, WeierstrassCurve.map\_map,
+      WeierstrassCurve.map\_injective}\leanok
+\uses{def:weier}
+\end{lemma}
+
+\begin{definition}[Variable changes]\label{def:vc}
+$\texttt{WeierstrassCurve.VariableChange}\,R$ is the datum
+$C=(u,r,s,t)$ with $u\in R^{\times}$ and $r,s,t\in R$.  These form a group under
+the classical composition law \cite[III, Table~3.1]{Silverman}, and act on
+$\texttt{WeierstrassCurve}\,R$ by
+\[
+  C\cdot W=\bigl(a_1',a_2',a_3',a_4',a_6'\bigr),
+\]
+where, writing $u^{-1}\in R^{\times}$,
+\[
+\begin{aligned}
+ a_1'&=u^{-1}(a_1+2s), &
+ a_2'&=u^{-2}(a_2-sa_1+3r-s^2),\\
+ a_3'&=u^{-3}(a_3+ra_1+2t), &
+ a_4'&=u^{-4}(a_4-sa_3+2ra_2-(t+rs)a_1+3r^2-2st),\\
+ a_6'&=u^{-6}(a_6+ra_4+r^2a_2+r^3-ta_3-t^2-rta_1). &&
+\end{aligned}
+\]
+This is a left action ($\onel\cdot W=W$, $(C_1C_2)\cdot W=C_1\cdot(C_2\cdot W)$).
+\lean{WeierstrassCurve.VariableChange, WeierstrassCurve.instGroupVariableChange,
+      WeierstrassCurve.instMulActionVariableChange}\leanok
+\end{definition}
+
+\begin{lemma}[Transformation of invariants]\label{lem:vc-invariants}
+For $C=(u,r,s,t)$ one has
+$(C\cdot W).\Delta=u^{-12}\,W.\Delta$, $(C\cdot W).c_4=u^{-4}\,W.c_4$,
+$(C\cdot W).c_6=u^{-6}\,W.c_6$.
+\lean{WeierstrassCurve.variableChange\_Delta, WeierstrassCurve.variableChange\_c4,
+      WeierstrassCurve.variableChange\_c6}\leanok
+\uses{def:vc,def:weier}
+\end{lemma}
+
+\begin{definition}[Elliptic curve; $j$-invariant]\label{def:iselliptic}
+$\texttt{WeierstrassCurve.IsElliptic}\,W$ is the class asserting that $\Delta$ is
+a unit; under it $\Delta'\in R^{\times}$ is the unit with
+$(\Delta':R)=\Delta$, and the $j$-invariant is $j\coloneqq (\Delta')^{-1}c_4^3$.
+Every $j_0\in F$ over a field $F$ is realised by an explicit curve
+$\texttt{ofJ}\,j_0$.
+\lean{WeierstrassCurve.IsElliptic, WeierstrassCurve.Delta', WeierstrassCurve.coe\_Delta',
+      WeierstrassCurve.j, WeierstrassCurve.ofJ}\leanok
+\uses{def:weier}
+\end{definition}
+
+\begin{warning}[The affine model is a presentation, not $\Mss$]\label{warn:pic}
+The Mathlib module docstring records the decisive caveat: the type
+$\texttt{WeierstrassCurve}\,R$ with $\isEll$ ``gives a type which can be beefed up
+to a category which is equivalent to the category of elliptic curves over
+$\Spec R$ in the case that $R$ has trivial Picard group $\mathrm{Pic}(R)$ or,
+slightly more generally, when its $12$-torsion is trivial.''  In general the two
+differ by line-bundle twists; see Part~\ref{sec:comparison}.  The object built in
+Parts~\ref{sec:weier}--\ref{sec:moduli} is therefore the \emph{Weierstrass
+presentation} of $\Mss$, whose fppf-stackification is $\Mss$.
+\end{warning}
+
+%==============================================================================
+\section{The base site: affine schemes with the fppf topology}\label{sec:base}
+%==============================================================================
+
+\begin{definition}[fppf covers of an affine scheme]\label{def:fppf-cover}
+A \emph{standard fppf cover} of $R\in\Aff$ is a finite family of ring maps
+$\{R\to R_i\}_{i\in I}$, each flat and of finite presentation, such that
+$R\to\prod_i R_i$ is faithfully flat (equivalently $\Spec(\prod R_i)\to\Spec R$
+is surjective).  The associated sieve on $\Spec R$ in $\Aff$ is generated by the
+$\underline{(R\to R_i)}:\Spec R_i\to\Spec R$.
+\lean{}\notready
+\end{definition}
+
+\begin{lemma}[The standard fppf data form a pretopology]\label{lem:fppf-pretop}
+The families of Definition~\ref{def:fppf-cover} contain the isomorphisms, are
+stable under base change (pullback of a flat finite-presentation map is again
+such, and faithful flatness is preserved), and are stable under composition
+(refinement).  Hence they define a \texttt{Pretopology} on $\Aff$, whose
+associated Grothendieck topology is the \emph{fppf topology} $\tau_{\mathrm{fppf}}$.
+\lean{}\notready
+\uses{def:fppf-cover,def:site}
+\end{lemma}
+\begin{proof}[Proof sketch]
+Pullback in $\Aff$ is the tensor product: the base change of $R\to R_i$ along
+$R\to R'$ is $R'\to R'\otimes_R R_i$.  Flatness and finite presentation are
+stable under base change (\texttt{Module.Flat.baseChange},
+\texttt{Algebra.FinitePresentation}\,base-change lemmas).  Faithful flatness of
+$R\to\prod R_i$ pulls back to faithful flatness of $R'\to\prod R'\otimes_R R_i$
+(\texttt{Module.FaithfullyFlat}\,base-change).  Stability under composition uses
+that a composite of flat (resp.\ finitely presented, resp.\ faithfully flat) maps
+is again such.  The pretopology axioms of
+\texttt{CategoryTheory.Pretopology} then hold by construction.  The Zariski and
+étale (co)topologies arise by restricting to open immersions
+(localisations $R\to R_f$) resp.\ to étale maps; they are coarser than
+$\tau_{\mathrm{fppf}}$.
+\end{proof}
+
+\begin{remark}[Set-theoretic size]\label{rem:small-site}
+To stay within Mathlib's universe discipline one works either with the
+\emph{small} fppf site of a fixed base ring $R_0$
+(the slice $\Aff_{/\Spec R_0}$ of finitely presented $R_0$-algebras) or with a
+suitable small category of rings.  The moduli constructions below are
+insensitive to this choice; we write $\Aff$ generically and fix a small model
+when formalising.
+\end{remark}
+
+%==============================================================================
+\section{The fibered category of Weierstrass curves}\label{sec:weier}
+%==============================================================================
+
+Throughout this section base arrows are read as in Convention~\ref{conv:aff}:
+an $\Aff$-arrow $\underline f:\Spec R\to\Spec R'$ is a ring map $f:R'\to R$.
+
+\subsection{Equivariance of the action under base change}
+
+\begin{definition}[Base change of a variable change]\label{def:vc-map}
+For a ring homomorphism $f:R\to A$ define $\map\,f:\VC(R)\to\VC(A)$ on underlying
+data by $(u,r,s,t)\mapsto(\mathrm{Units.map}\,f\,u,\ f(r),\ f(s),\ f(t))$.
+\lean{WeierstrassCurve.VariableChange.map}\notready
+\uses{def:vc}
+\end{definition}
+
+\begin{lemma}[$\map\,f$ preserves the identity]\label{lem:vc-map-one}
+For $f:R\to A$, $\map\,f\,\onel=\onel$ in $\VC(A)$.
+\lean{WeierstrassCurve.VariableChange.map\_one}\notready
+\uses{def:vc-map,def:vc}
+\end{lemma}
+
+\begin{lemma}[$\map\,f$ preserves the product]\label{lem:vc-map-mul}
+For $f:R\to A$ and $C_1,C_2\in\VC(R)$,
+$\map\,f\,(C_1C_2)=(\map\,f\,C_1)(\map\,f\,C_2)$; hence $\map\,f$ is a group
+homomorphism $\VC(R)\to\VC(A)$.
+\lean{WeierstrassCurve.VariableChange.map\_mul}\notready
+\uses{def:vc-map,def:vc}
+\end{lemma}
+
+\begin{lemma}[Functoriality of $\map$: identity]\label{lem:vc-map-id}
+$\map\,(\mathrm{RingHom.id}\,R)=\mathrm{id}_{\VC(R)}$.
+\lean{WeierstrassCurve.VariableChange.map\_id}\notready
+\uses{def:vc-map}
+\end{lemma}
+
+\begin{lemma}[Functoriality of $\map$: composition]\label{lem:vc-map-comp}
+For $f:R\to A$ and $g:A\to B$ one has $\map\,(g\circ f)=\map\,g\circ\map\,f$;
+equivalently $\map\,g\,(\map\,f\,C)=\map\,(g\circ f)\,C$ for all $C\in\VC(R)$.
+\lean{WeierstrassCurve.VariableChange.map\_map}\notready
+\uses{def:vc-map}
+\end{lemma}
+
+\begin{lemma}[Equivariance of the action under base change]\label{lem:equivariance}
+For $f:R\to A$, $C\in\VC(R)$ and $W:\texttt{WeierstrassCurve}\,R$,
+\[
+   (C\cdot W).\map\,f \;=\; (\map\,f\,C)\cdot(W.\map\,f).
+\]
+\lean{WeierstrassCurve.map\_variableChange}\notready
+\uses{def:vc-map,def:weier,lem:map-func}
+\end{lemma}
+\begin{proof}[Proof sketch]
+Both sides are Weierstrass curves over $A$; by \texttt{WeierstrassCurve.ext} it
+suffices to compare the five coefficients $a_1,\dots,a_6$.  Each coefficient of
+the left side is $f$ applied to the corresponding coefficient of $C\cdot W$, i.e.\
+$f$ applied to a polynomial in $u^{-1},r,s,t,a_i$ (Definition~\ref{def:vc}); each
+coefficient of the right side is the same polynomial evaluated at
+$\mathrm{Units.map}\,f\,u^{-1}=f(u^{-1})$, $f(r),f(s),f(t),f(a_i)$.  The two agree
+because $f$ is a ring homomorphism and $\mathrm{Units.map}\,f$ commutes with
+inversion; each coefficient identity is closed by \texttt{map\_mul},
+\texttt{map\_add}, \texttt{map\_pow}, \texttt{Units.coe\_map} and \texttt{ring}.
+\end{proof}
+
+\subsection{The total category}
+
+\begin{definition}[Objects of $\Weier$]\label{def:total-obj}
+An object of $\Weier$ is a pair $(R,W)$ with $R\in\Aff$ and
+$W:\texttt{WeierstrassCurve}\,R$.
+\lean{}\notready
+\uses{def:weier,conv:aff}
+\end{definition}
+
+\begin{definition}[Morphisms of $\Weier$]\label{def:total-hom}
+A morphism $(R,W)\to(R',W')$ is a pair $(\underline f,C)$ where
+$\underline f:\Spec R\to\Spec R'$ is an $\Aff$-arrow (a ring map $f:R'\to R$) and
+$C\in\VC(R)$ satisfies
+\begin{equation}\label{eq:mor}
+   C\cdot W \;=\; W'.\map\,f .
+\end{equation}
+Two morphisms are equal iff their $\Aff$-arrows and their $\VC$-components agree,
+the condition \eqref{eq:mor} being a proposition.
+\lean{}\notready
+\uses{def:total-obj,def:vc,def:vc-map,conv:aff}
+\end{definition}
+
+\begin{lemma}[The identity datum is a morphism]\label{lem:id-welldef}
+For $(R,W)\in\Weier$ the pair $(\underline{\id_R},\onel)$ satisfies \eqref{eq:mor}:
+$\onel\cdot W=W=W.\map\,(\mathrm{RingHom.id}\,R)$.
+\lean{}\notready
+\uses{def:total-hom,lem:map-func,def:vc}
+\end{lemma}
+
+\begin{definition}[Identity morphism]\label{def:total-id}
+The identity of $(R,W)$ is $\onel_{(R,W)}\coloneqq(\underline{\id_R},\onel)$,
+well-defined by Lemma~\ref{lem:id-welldef}.
+\lean{}\notready
+\uses{lem:id-welldef}
+\end{definition}
+
+\begin{lemma}[The composite datum is a morphism]\label{lem:comp-welldef}
+Given
+$(R,W)\xrightarrow{(\underline f,C)}(R',W')\xrightarrow{(\underline g,C')}(R'',W'')$
+(so $f:R'\to R$, $g:R''\to R'$), the pair
+$(\underline{f\circ g},\ (\map\,f\,C')\cdot C)$ satisfies \eqref{eq:mor} over $R$:
+\[
+   \bigl((\map\,f\,C')\cdot C\bigr)\cdot W=W''.\map\,(f\circ g).
+\]
+\lean{}\notready
+\uses{def:total-hom,lem:equivariance,lem:map-func}
+\end{lemma}
+\begin{proof}
+Using $C\cdot W=W'.\map\,f$ and $C'\cdot W'=W''.\map\,g$,
+\[
+\begin{aligned}
+ ((\map\,f\,C')\cdot C)\cdot W
+   &=(\map\,f\,C')\cdot(C\cdot W)          &&\text{(\texttt{mul\_smul})}\\
+   &=(\map\,f\,C')\cdot(W'.\map\,f)         &&\text{(hypothesis on }C)\\
+   &=(C'\cdot W').\map\,f                    &&\text{(Lemma~\ref{lem:equivariance})}\\
+   &=(W''.\map\,g).\map\,f                   &&\text{(hypothesis on }C')\\
+   &=W''.\map\,(f\circ g)                    &&\text{(Lemma~\ref{lem:map-func}).}
+\end{aligned}
+\]
+\end{proof}
+
+\begin{definition}[Composition]\label{def:total-comp}
+The composite of $(\underline f,C)$ and $(\underline g,C')$ as above is
+\begin{equation}\label{eq:comp}
+   (\underline f,C)\gg(\underline g,C')\;\coloneqq\;
+   (\underline{f\circ g},\ (\map\,f\,C')\cdot C ),
+\end{equation}
+well-defined by Lemma~\ref{lem:comp-welldef}.
+\lean{}\notready
+\uses{lem:comp-welldef,def:vc-map}
+\end{definition}
+
+\begin{lemma}[Left identity]\label{lem:total-id-comp}
+$\onel_{(R,W)}\gg(\underline f,C)=(\underline f,C)$ for every
+$(\underline f,C):(R,W)\to(R',W')$.
+\lean{}\notready
+\uses{def:total-comp,def:total-id,lem:vc-map-id}
+\end{lemma}
+\begin{proof}
+The $\Aff$-component is $\underline{\id_R\circ f}=\underline f$; the
+$\VC$-component is $(\map\,\id\,C)\cdot\onel=C\cdot\onel=C$, using
+Lemma~\ref{lem:vc-map-id} and \texttt{mul\_one}.
+\end{proof}
+
+\begin{lemma}[Right identity]\label{lem:total-comp-id}
+$(\underline f,C)\gg\onel_{(R',W')}=(\underline f,C)$.
+\lean{}\notready
+\uses{def:total-comp,def:total-id,lem:vc-map-one}
+\end{lemma}
+\begin{proof}
+The $\Aff$-component is $\underline{f\circ\id_{R'}}=\underline f$; the
+$\VC$-component is $(\map\,f\,\onel)\cdot C=\onel\cdot C=C$, using
+Lemma~\ref{lem:vc-map-one} and \texttt{one\_mul}.
+\end{proof}
+
+\begin{lemma}[Associativity]\label{lem:total-assoc}
+For composable $(\underline f,C),(\underline g,C'),(\underline h,C'')$,
+\[
+ ((\underline f,C)\gg(\underline g,C'))\gg(\underline h,C'')
+ =(\underline f,C)\gg((\underline g,C')\gg(\underline h,C'')).
+\]
+\lean{}\notready
+\uses{def:total-comp,lem:vc-map-mul,lem:vc-map-comp}
+\end{lemma}
+\begin{proof}
+Both $\Aff$-components equal $\underline{f\circ g\circ h}$.  The $\VC$-components
+are
+\[
+ (\map\,(f\circ g)\,C'')\cdot((\map\,f\,C')\cdot C)
+ \quad\text{and}\quad
+ (\map\,f\,((\map\,g\,C'')\cdot C'))\cdot C .
+\]
+Expanding the second by Lemma~\ref{lem:vc-map-mul} ($\map\,f$ preserves products)
+and Lemma~\ref{lem:vc-map-comp}
+($\map\,f\,(\map\,g\,C'')=\map\,(f\circ g)\,C''$) yields
+$((\map\,(f\circ g)\,C'')\cdot(\map\,f\,C'))\cdot C$, equal to the first by
+\texttt{mul\_assoc}.
+\end{proof}
+
+\begin{definition}[The category $\Weier$]\label{def:total}
+The objects (Definition~\ref{def:total-obj}), morphisms
+(Definition~\ref{def:total-hom}), identities (Definition~\ref{def:total-id}) and
+composition (Definition~\ref{def:total-comp}), together with
+Lemmas~\ref{lem:total-id-comp}, \ref{lem:total-comp-id} and
+\ref{lem:total-assoc}, constitute a category $\Weier$.
+\lean{Mathlib.AlgebraicGeometry.EllipticCurve.Moduli.Weierstrass}\notready
+\uses{def:total-obj,def:total-hom,def:total-id,def:total-comp,lem:total-id-comp,lem:total-comp-id,lem:total-assoc}
+\end{definition}
+
+\begin{definition}[The projection $p_{\Weier}$]\label{def:proj}
+$p_{\Weier}:\Weier\to\Aff$ sends $(R,W)\mapsto\Spec R$ and
+$(\underline f,C)\mapsto\underline f$.  It preserves identities and composition
+by Definitions~\ref{def:total-id} and \ref{def:total-comp}, whose $\Aff$-components
+are $\underline{\id}$ and the composite of the $\Aff$-components respectively.
+\lean{}\notready
+\uses{def:total}
+\end{definition}
+
+\subsection{Cartesian structure}
+
+\begin{lemma}[Morphisms are homlifts]\label{lem:homlift-mor}
+Every morphism $(\underline f,C):(R,W)\to(R',W')$ satisfies
+$p_{\Weier}.\isHomLift\,\underline f\,(\underline f,C)$, by definition of the
+projection.
+\lean{}\notready
+\uses{def:proj,def:homlift}
+\end{lemma}
+
+\begin{lemma}[Vertical morphisms]\label{lem:vertical-iff}
+A morphism $(\underline g,C):(R,W)\to(R,W_0)$ is vertical (a lift of $\onel_R$)
+iff $g=\id_R$; the vertical morphisms $(R,W)\to(R,W_0)$ are then exactly the
+$C\in\VC(R)$ with $C\cdot W=W_0$.
+\lean{}\notready
+\uses{lem:homlift-mor,def:homlift,def:fiber}
+\end{lemma}
+
+\begin{lemma}[Fibre hom-sets]\label{lem:fiber-hom}
+For $R\in\Aff$ and $W,W_0$ over $R$, the hom-set in the fibre
+$p_{\Weier}.\mathtt{Fiber}\,(\Spec R)$ is
+$\Hom(W,W_0)=\{\,C\in\VC(R)\mid C\cdot W=W_0\,\}$.
+\lean{}\notready
+\uses{lem:vertical-iff,def:fiber}
+\end{lemma}
+
+\begin{lemma}[Fibre composition is the group law]\label{lem:fiber-comp}
+Composition in $p_{\Weier}.\mathtt{Fiber}\,(\Spec R)$ is the group law of
+$\VC(R)$: the composite of $C:W\to W_0$ and $C':W_0\to W_1$ has $\VC$-component
+$C'\cdot C$.
+\lean{}\notready
+\uses{lem:fiber-hom,def:total-comp,lem:vc-map-id}
+\end{lemma}
+\begin{proof}
+By \eqref{eq:comp} with $f=g=\id_R$ the composite has $\VC$-component
+$(\map\,\id\,C')\cdot C=C'\cdot C$, using Lemma~\ref{lem:vc-map-id}.
+\end{proof}
+
+\begin{lemma}[The fibre is a groupoid]\label{lem:fiber-groupoid}
+$p_{\Weier}.\mathtt{Fiber}\,(\Spec R)$ is a groupoid: a morphism $C:W\to W_0$
+(so $C\cdot W=W_0$) has two-sided inverse $C^{-1}:W_0\to W$, where
+$C^{-1}\cdot W_0=W$.
+\lean{}\notready
+\uses{lem:fiber-hom,lem:fiber-comp,def:vc}
+\end{lemma}
+\begin{proof}
+$C^{-1}\cdot W_0=C^{-1}\cdot(C\cdot W)=(C^{-1}C)\cdot W=W$ by \texttt{mul\_smul}
+and \texttt{inv\_mul\_cancel}; the two composites are $C^{-1}C=\onel$ and
+$CC^{-1}=\onel$ (Lemma~\ref{lem:fiber-comp}).
+\end{proof}
+
+\begin{lemma}[The fibre is the translation groupoid]\label{lem:fiber-descr}
+For $R\in\Aff$ the fibre $p_{\Weier}.\mathtt{Fiber}\,(\Spec R)$ is isomorphic, as a
+category, to the action groupoid $\VC(R)\ltimes\texttt{WeierstrassCurve}\,R$
+(objects Weierstrass curves over $R$; $\Hom(W,W_0)=\{C\mid C\cdot W=W_0\}$;
+composition the group law).  The isomorphism is the identity on objects and
+$C\mapsto C$ on morphisms.
+\lean{}\notready
+\uses{lem:fiber-hom,lem:fiber-comp,lem:fiber-groupoid}
+\end{lemma}
+
+\begin{lemma}[Base-change data is a morphism]\label{lem:scart-welldef}
+For $\underline f:\Spec R\to\Spec R'$ (ring map $f:R'\to R$) and
+$(R',W')\in\Weier$, the pair $\lambda_{f,W'}\coloneqq(\underline f,\onel)$ is a
+morphism $(R,\,W'.\map\,f)\to(R',W')$: indeed $\onel\cdot(W'.\map\,f)=W'.\map\,f$.
+\lean{}\notready
+\uses{def:total-hom,def:vc}
+\end{lemma}
+
+\begin{lemma}[Existence of the cartesian factorisation]\label{lem:scart-exist}
+Let $(A,V)\in\Weier$, let $\underline h:\Spec A\to\Spec R$ (ring map $h:R\to A$),
+and let $\psi=(\underline{k},D):(A,V)\to(R',W')$ lift
+$\underline f\circ\underline h$, so $k=h\circ f$ and $D\cdot V=W'.\map\,k$.  Then
+$\chi\coloneqq(\underline h,D)$ is a morphism $(A,V)\to(R,W'.\map\,f)$ and
+$\chi\gg\lambda_{f,W'}=\psi$.
+\lean{}\notready
+\uses{lem:scart-welldef,def:total-comp,lem:map-func}
+\end{lemma}
+\begin{proof}
+Legitimacy of $\chi$ is $D\cdot V=(W'.\map\,f).\map\,h$, which holds because
+$D\cdot V=W'.\map\,(h\circ f)=(W'.\map\,f).\map\,h$ by Lemma~\ref{lem:map-func}.
+By \eqref{eq:comp}, $\chi\gg\lambda_{f,W'}$ has $\Aff$-component
+$\underline{h\circ f}=\underline k$ and $\VC$-component
+$(\map\,h\,\onel)\cdot D=D$, so $\chi\gg\lambda_{f,W'}=\psi$.
+\end{proof}
+
+\begin{lemma}[Uniqueness of the cartesian factorisation]\label{lem:scart-uniq}
+With notation as in Lemma~\ref{lem:scart-exist}, any morphism
+$\chi'=(\underline h,E):(A,V)\to(R,W'.\map\,f)$ with
+$\chi'\gg\lambda_{f,W'}=\psi$ has $E=D$; hence $\chi'=\chi$.
+\lean{}\notready
+\uses{def:total-comp}
+\end{lemma}
+\begin{proof}
+By \eqref{eq:comp} the $\VC$-component of $\chi'\gg\lambda_{f,W'}$ is
+$(\map\,h\,\onel)\cdot E=E$; equating with that of $\psi$ gives $E=D$.
+\end{proof}
+
+\begin{lemma}[Base-change arrows are strongly cartesian]\label{lem:scart}
+For $\underline f:\Spec R\to\Spec R'$ and $(R',W')\in\Weier$, the arrow
+$\lambda_{f,W'}=(\underline f,\onel):(R,\,W'.\map\,f)\to(R',W')$ is strongly
+cartesian.
+\lean{}\notready
+\uses{def:cartesian,lem:scart-welldef,lem:scart-exist,lem:scart-uniq}
+\end{lemma}
+\begin{proof}
+Lemmas~\ref{lem:scart-exist} and \ref{lem:scart-uniq} provide the unique
+factorisation required by Definition~\ref{def:cartesian}(b).
+\end{proof}
+
+\begin{lemma}[$p_{\Weier}$ is prefibered]\label{lem:weier-prefibered}
+$p_{\Weier}$ is prefibered: for every $\underline f:\Spec R\to\Spec R'$ and
+$(R',W')$ over $\Spec R'$, the arrow $\lambda_{f,W'}$ (Lemma~\ref{lem:scart}) is a
+strongly cartesian lift of $\underline f$ with target $(R',W')$.
+\lean{}\notready
+\uses{def:isfibered,lem:scart,def:proj}
+\end{lemma}
+
+\begin{theorem}[$p_{\Weier}$ is fibered]\label{thm:weier-fibered}
+$p_{\Weier}:\Weier\to\Aff$ is a fibered category ($\isFib$).
+\lean{}\notready
+\uses{def:isfibered,lem:weier-prefibered,lem:scart-api}
+\end{theorem}
+\begin{proof}
+$p_{\Weier}$ is prefibered (Lemma~\ref{lem:weier-prefibered}) and strongly
+cartesian morphisms compose (Lemma~\ref{lem:scart-api}).
+\end{proof}
+
+\begin{proposition}[Groupoid fibres give a CFG]\label{prop:cfg-suff}
+Let $p:\mathcal X\to\mathcal S$ be prefibered.  If every fibre
+$p.\mathtt{Fiber}\,S$ is a groupoid, then every morphism of $\mathcal X$ is
+strongly cartesian; i.e.\ $p$ is fibered in groupoids.
+\lean{}\notready
+\uses{def:cfg,def:fiber,def:isfibered}
+\end{proposition}
+\begin{proof}[Proof sketch]
+Given $\varphi:a\to b$ over $f:R\to S$ and a test $\psi:a'\to b$ over $f\circ g$,
+let $\lambda:f^*b\to b$ be a strongly cartesian lift (prefiberedness).  Then
+$\psi=\chi_0\gg\lambda$ with $\chi_0$ over $g$, and $\varphi=v\gg\lambda$ with $v$
+vertical, hence invertible as the fibre is a groupoid; $\chi\coloneqq\chi_0\gg
+v^{-1}$ is the unique factorisation, so $\varphi$ is strongly cartesian.
+\end{proof}
+
+\begin{proposition}[A CFG has groupoid fibres]\label{prop:cfg-nec}
+If $p:\mathcal X\to\mathcal S$ is fibered in groupoids, then every fibre is a
+groupoid.
+\lean{}\notready
+\uses{def:cfg,def:fiber,lem:scart-api}
+\end{proposition}
+\begin{proof}[Proof sketch]
+A fibre morphism is vertical, hence lifts the isomorphism $\onel_S$; being
+strongly cartesian it is an isomorphism (Lemma~\ref{lem:scart-api}).
+\end{proof}
+
+\begin{proposition}[Groupoid criterion]\label{prop:cfg-criterion}
+A prefibered $p:\mathcal X\to\mathcal S$ is fibered in groupoids iff every fibre
+is a groupoid.
+\lean{}\notready
+\uses{prop:cfg-suff,prop:cfg-nec}
+\end{proposition}
+
+\begin{corollary}[$\Weier$ is a CFG]\label{cor:weier-cfg}
+$p_{\Weier}$ is fibered in groupoids: it is prefibered
+(Lemma~\ref{lem:weier-prefibered}) and each fibre is a groupoid
+(Lemma~\ref{lem:fiber-groupoid}); apply Proposition~\ref{prop:cfg-suff}.
+\lean{}\notready
+\uses{lem:weier-prefibered,lem:fiber-groupoid,prop:cfg-suff}
+\end{corollary}
+
+\subsection{The pseudofunctor presentation (optional route)}
+
+\begin{definition}[The base-change functor]\label{def:F-map}
+For a ring map $f:R\to A$, the assignment $W\mapsto W.\map\,f$ on objects and
+$C\mapsto\map\,f\,C$ on morphisms is a functor
+$\mathbf F(f):\mathbf F(R)\to\mathbf F(A)$ between the fibre groupoids of
+Lemma~\ref{lem:fiber-descr}, where
+$\mathbf F(R)\coloneqq\VC(R)\ltimes\texttt{WeierstrassCurve}\,R$; functoriality on
+morphisms is Lemma~\ref{lem:equivariance}.
+\lean{}\notready
+\uses{lem:fiber-descr,def:vc-map,lem:equivariance}
+\end{definition}
+
+\begin{construction}[The pseudofunctor $\mathbf F$]\label{con:pseudofunctor}
+The data $R\mapsto\mathbf F(R)$, $f\mapsto\mathbf F(f)$
+(Definition~\ref{def:F-map}) assemble into a pseudofunctor
+$\mathbf F:\mathtt{LocallyDiscrete}\,\CRingCat\to\Cat$: the unitor
+$\mathbf F(\id)\cong\mathrm{id}$ and the associator
+$\mathbf F(g)\circ\mathbf F(f)\cong\mathbf F(g\circ f)$ are the identity $2$-cells
+supplied by \texttt{map\_id} and \texttt{map\_map} (Lemma~\ref{lem:map-func}), and
+the pentagon and triangle coherences hold because these $2$-cells are identities.
+\lean{}\notready
+\uses{def:F-map,lem:map-func}
+\end{construction}
+
+\begin{construction}[$\Weier$ as a CoGrothendieck construction]\label{con:weier-cogroth}
+Under the identification $\Aff^{\op}=\CRingCat$, $\mathbf F$ is a contravariant
+pseudofunctor on $\Aff$, and its CoGrothendieck construction
+(Remark~\ref{rem:grothendieck}) satisfies $\int^{\mathrm c}\!\mathbf F\cong\Weier$
+over $\Aff$, with the Mathlib projection
+$\mathtt{forget}\,\mathbf F:\int^{\mathrm c}\!\mathbf F\to\Aff$ equal to
+$p_{\Weier}$ (Definition~\ref{def:proj}) across this isomorphism.
+\lean{CategoryTheory.Pseudofunctor.CoGrothendieck, CategoryTheory.Pseudofunctor.CoGrothendieck.forget}\notready
+\uses{con:pseudofunctor,def:total,def:proj,rem:grothendieck}
+\end{construction}
+\begin{remark}
+Along this route the fibered-category conclusions are supplied by Mathlib: by
+Proposition~\ref{prop:cogroth-fibered}, $\mathtt{forget}\,\mathbf F$ carries an
+\texttt{IsFibered} instance (with strongly cartesian lifts $\mathtt{cartesianLift}$),
+which is Theorem~\ref{thm:weier-fibered} and the prefibered part of
+Corollary~\ref{cor:weier-cfg} transported across
+$\int^{\mathrm c}\!\mathbf F\cong\Weier$; since each fibre $\mathbf F(R)$ is a
+groupoid (Lemma~\ref{lem:fiber-groupoid}), Proposition~\ref{prop:cfg-suff} gives
+Corollary~\ref{cor:weier-cfg}.  The obligation this route incurs is
+Construction~\ref{con:pseudofunctor}, i.e.\ producing the pseudofunctor
+$\mathbf F$ with its coherences.  The direct route
+(Definitions~\ref{def:total-obj}--Corollary~\ref{cor:weier-cfg}) instead proves
+strong cartesianness by hand (Lemma~\ref{lem:scart}) and does not require the
+bicategorical coherences.
+\end{remark}
+
+%==============================================================================
+\section{The moduli stack of elliptic curves (Weierstrass model)}\label{sec:moduli}
+%==============================================================================
+
+\subsection{The moduli category and its fibered structure}
+
+\begin{lemma}[$\isEll$ is stable under base change]\label{lem:iselliptic-map}
+If $W.\isEll$ and $f:R\to A$ then $(W.\map\,f).\isEll$.  Indeed
+$(W.\map\,f).\Delta=f(W.\Delta)$ (Lemma~\ref{lem:map-func}) is a unit, since a
+ring homomorphism sends units to units.
+\lean{WeierstrassCurve.IsElliptic.map}\notready
+\uses{def:iselliptic,lem:map-func}
+\end{lemma}
+
+\begin{lemma}[$\isEll$ is stable under variable change]\label{lem:iselliptic-vc}
+If $W.\isEll$ and $C=(u,r,s,t)\in\VC(R)$ then $(C\cdot W).\isEll$.  Indeed
+$(C\cdot W).\Delta=u^{-12}\,W.\Delta$ (Lemma~\ref{lem:vc-invariants}) is a product
+of units.
+\lean{}\notready
+\uses{def:iselliptic,lem:vc-invariants,def:vc}
+\end{lemma}
+
+\begin{definition}[The Weierstrass moduli category]\label{def:MW}
+$\MW$ is the full subcategory of $\Weier$ on the objects $(R,W)$ with $W.\isEll$.
+\lean{}\notready
+\uses{def:total,def:iselliptic}
+\end{definition}
+
+\begin{definition}[The moduli projection]\label{def:MW-proj}
+$p:\MW\to\Aff$ is the composite of the inclusion $\MW\hookrightarrow\Weier$ with
+$p_{\Weier}$ (Definition~\ref{def:proj}).
+\lean{}\notready
+\uses{def:MW,def:proj}
+\end{definition}
+
+\begin{lemma}[Base-change lifts stay elliptic]\label{lem:MW-lift}
+If $(R',W')\in\MW$ (so $W'.\isEll$) and $\underline f:\Spec R\to\Spec R'$, then the
+source $(R,\,W'.\map\,f)$ of $\lambda_{f,W'}$ (Lemma~\ref{lem:scart}) lies in
+$\MW$.
+\lean{}\notready
+\uses{def:MW,lem:scart,lem:iselliptic-map}
+\end{lemma}
+
+\begin{lemma}[The lifts are strongly cartesian in $\MW$]\label{lem:MW-scart}
+For $(R',W')\in\MW$ and $\underline f:\Spec R\to\Spec R'$, the arrow
+$\lambda_{f,W'}$ is strongly cartesian for $p:\MW\to\Aff$.
+\lean{}\notready
+\uses{lem:MW-lift,lem:scart,def:MW}
+\end{lemma}
+\begin{proof}
+$\MW\subseteq\Weier$ is full, so its hom-sets between elliptic objects coincide
+with those of $\Weier$.  The universal property (Definition~\ref{def:cartesian})
+for $p$ quantifies over test objects of $\MW$, a subfamily of those for
+$p_{\Weier}$; the unique factorisation produced in Lemma~\ref{lem:scart} has
+source a test object of $\MW$ and target $(R,\,W'.\map\,f)\in\MW$
+(Lemma~\ref{lem:MW-lift}), hence is a morphism of $\MW$.  Thus $\lambda_{f,W'}$ is
+strongly cartesian in $\MW$.
+\end{proof}
+
+\begin{lemma}[$p:\MW\to\Aff$ is prefibered]\label{lem:MW-prefibered}
+For every $\underline f:\Spec R\to\Spec R'$ and $(R',W')\in\MW$, the arrow
+$\lambda_{f,W'}$ is a strongly cartesian lift of $\underline f$ in $\MW$ with
+target $(R',W')$.
+\lean{}\notready
+\uses{def:isfibered,lem:MW-scart,def:MW-proj}
+\end{lemma}
+
+\begin{lemma}[The fibres of $\MW$ are groupoids]\label{lem:MW-fiber-groupoid}
+For $R\in\Aff$, $p.\mathtt{Fiber}\,(\Spec R)$ is the full subcategory of
+$p_{\Weier}.\mathtt{Fiber}\,(\Spec R)$ (Lemma~\ref{lem:fiber-descr}) on the
+elliptic curves, and it is a groupoid.
+\lean{}\notready
+\uses{lem:fiber-groupoid,lem:iselliptic-vc,def:MW}
+\end{lemma}
+\begin{proof}
+By Lemma~\ref{lem:iselliptic-vc}, if $W.\isEll$ and $C\cdot W=W_0$ then
+$W_0.\isEll$; the fibre is thus the full subcategory of
+Lemma~\ref{lem:fiber-descr} on elliptic objects, and the inverse $C^{-1}$
+(Lemma~\ref{lem:fiber-groupoid}) preserves ellipticity, so it is a groupoid.
+\end{proof}
+
+\begin{theorem}[$\MW$ is a CFG]\label{thm:MW-cfg}
+$p:\MW\to\Aff$ is fibered in groupoids.
+\lean{}\notready
+\uses{lem:MW-prefibered,lem:MW-fiber-groupoid,prop:cfg-suff}
+\end{theorem}
+\begin{proof}
+$p$ is prefibered (Lemma~\ref{lem:MW-prefibered}) and its fibres are groupoids
+(Lemma~\ref{lem:MW-fiber-groupoid}); apply Proposition~\ref{prop:cfg-suff}.
+\end{proof}
+
+\subsection{The \texorpdfstring{$j$}{j}-invariant}
+
+\begin{definition}[The affine \texorpdfstring{$j$}{j}-line]\label{def:affine-line}
+$\mathbb A^1$ is the CFG over $\Aff$ represented by $\mathbb Z[j]$: its fibre over
+$R$ is the discrete category on the underlying set of $R$ (objects $(R,x)$ with
+$x\in R$; only identity morphisms), and base change is application of the ring
+map.
+\lean{}\notready
+\uses{def:cfg}
+\end{definition}
+
+\begin{lemma}[$j$ is invariant under variable change]\label{lem:j-vc}
+For $W.\isEll$ and $C\in\VC(R)$, $(C\cdot W).j=W.j$.
+\lean{WeierstrassCurve.variableChange\_j}\notready
+\uses{def:iselliptic,lem:iselliptic-vc}
+\end{lemma}
+
+\begin{lemma}[$j$ is natural under base change]\label{lem:j-map}
+For $W.\isEll$ and $f:R\to A$, $(W.\map\,f).j=f(W.j)$.
+\lean{WeierstrassCurve.map\_j}\notready
+\uses{def:iselliptic,lem:iselliptic-map}
+\end{lemma}
+
+\begin{definition}[The \texorpdfstring{$j$}{j}-line morphism]\label{def:jmap}
+The assignment $(R,W)\mapsto(R,W.j)$ and $(\underline f,C)\mapsto\underline f$
+defines a morphism of CFGs $\mathfrak j:\MW\to\mathbb A^1$ over $\Aff$:
+Lemma~\ref{lem:j-vc} makes it well-defined on morphisms (the $\VC$-component acts
+trivially on $j$), and Lemma~\ref{lem:j-map} makes it commute with base change.
+\lean{}\notready
+\uses{def:MW,def:affine-line,lem:j-vc,lem:j-map}
+\end{definition}
+
+\begin{lemma}[$\texttt{ofJ}$ realises a $j$-invariant]\label{lem:ofJ-j}
+Over a field $F$, $(\texttt{ofJ}\,j_0).j=j_0$ for every $j_0\in F$.
+\lean{WeierstrassCurve.ofJ\_j}\notready
+\uses{def:iselliptic}
+\end{lemma}
+
+\begin{proposition}[Fibrewise essential surjectivity of $\mathfrak j$ over a field]\label{prop:j-surj}
+Over a field $F$, $\mathfrak j$ is essentially surjective on the fibre: every
+$j_0\in F$ equals $W.j$ for $W=\texttt{ofJ}\,j_0$ (Lemma~\ref{lem:ofJ-j}).  The
+complementary fibrewise injectivity holds over separably closed fields and is the
+target \texttt{isom\_iff\_j\_eq}.
+\lean{}\notready
+\uses{def:jmap,lem:ofJ-j}
+\end{proposition}
+
+\subsection{The quotient presentation}
+
+\begin{definition}[Universal Weierstrass ring]\label{def:univ-ring-P}
+$P\coloneqq\mathbb Z[a_1,a_2,a_3,a_4,a_6]=\texttt{MvPolynomial (Fin 5)}\ \mathbb Z$,
+the polynomial ring on the five Weierstrass coefficients.
+\lean{}\notready
+\uses{def:weier}
+\end{definition}
+
+\begin{definition}[Tautological curve and its discriminant]\label{def:univ-curve-P}
+$W^{P}:\texttt{WeierstrassCurve}\,P$ is the curve whose coefficients are the five
+generators of $P$; set $\Delta_P\coloneqq W^{P}.\Delta\in P$.
+\lean{}\notready
+\uses{def:univ-ring-P,def:weier}
+\end{definition}
+
+\begin{definition}[Universal base ring]\label{def:univ-ring-A}
+$A\coloneqq P[\Delta_P^{-1}]=\texttt{Localization.Away}\,\Delta_P$, with structure
+map $\iota:P\to A$.
+\lean{}\notready
+\uses{def:univ-curve-P}
+\end{definition}
+
+\begin{definition}[Universal elliptic curve]\label{def:univ}
+$W^{\mathrm{univ}}\coloneqq W^{P}.\map\,\iota:\texttt{WeierstrassCurve}\,A$.
+\lean{}\notready
+\uses{def:univ-ring-A,def:univ-curve-P,def:weier}
+\end{definition}
+
+\begin{lemma}[The universal curve is elliptic]\label{lem:univ-elliptic}
+$W^{\mathrm{univ}}.\isEll$, because
+$\iota(\Delta_P)=W^{\mathrm{univ}}.\Delta$ is a unit in
+$A=\texttt{Localization.Away}\,\Delta_P$.
+\lean{}\notready
+\uses{def:univ,def:iselliptic,lem:iselliptic-map}
+\end{lemma}
+
+\begin{definition}[The group functor of variable changes]\label{def:G}
+$G\colon\CRing\to\mathrm{Grp}$ is the functor $R\mapsto\VC(R)$, with the group law
+of Definition~\ref{def:vc} and functoriality $\map$ (Definition~\ref{def:vc-map}).
+\lean{}\notready
+\uses{def:vc,def:vc-map}
+\end{definition}
+
+\begin{lemma}[Representability of $G$]\label{lem:G-representable}
+$G$ is representable by $\mathbb Z[u,u^{-1},r,s,t]$; as a scheme
+$G\cong\Gm\times\Ga^3$, with group law the semidirect product $\Ga^3\rtimes\Gm$
+for the evident weights.
+\lean{}\notready
+\uses{def:G,def:vc}
+\end{lemma}
+
+\begin{definition}[The $G$-action on $\Spec A$]\label{def:G-action}
+$G$ acts on $\Spec A$ by variable change, $C\cdot W^{\mathrm{univ}}$; the co-action
+is the $A$-algebra map $A\to A\otimes\mathbb Z[u,u^{-1},r,s,t]$ dual to the
+transformed coefficients of Definition~\ref{def:vc}.
+\lean{}\notready
+\uses{def:G,def:univ,def:vc}
+\end{definition}
+
+\begin{lemma}[Points of $\Spec A$ are elliptic curves]\label{lem:Apoint-elliptic}
+For $R\in\CRing$, the assignment $(\varphi:A\to R)\mapsto W^{\mathrm{univ}}.\map\,\varphi$
+is a bijection from $\Hom_{\CRing}(A,R)$ to the set of elliptic
+$W:\texttt{WeierstrassCurve}\,R$.
+\lean{}\notready
+\uses{def:univ,def:univ-ring-A,def:iselliptic}
+\end{lemma}
+\begin{proof}
+By the universal property of $P=\texttt{MvPolynomial (Fin 5)}\,\mathbb Z$, a ring
+map $P\to R$ is a choice of $(a_i)\in R^5$; by the universal property of
+$\texttt{Localization.Away}\,\Delta_P$ it extends to $A\to R$ iff the image of
+$\Delta_P$, namely $W.\Delta$, is a unit, i.e.\ iff $W.\isEll$
+(Definition~\ref{def:iselliptic}).
+\end{proof}
+
+\begin{lemma}[The bijection is $G$-equivariant and natural]\label{lem:quotient-compat}
+Under Lemma~\ref{lem:Apoint-elliptic}, the $G(R)=\VC(R)$-action on
+$\Hom_{\CRing}(A,R)$ (Definition~\ref{def:G-action}) corresponds to the
+variable-change action on elliptic curves, and the bijection is natural in $R$
+along base change (Lemma~\ref{lem:equivariance}).
+\lean{}\notready
+\uses{lem:Apoint-elliptic,def:G-action,lem:equivariance}
+\end{lemma}
+
+\begin{theorem}[Quotient presentation]\label{thm:quotient}
+The universal curve induces an equivalence of CFGs over $\Aff$
+\[
+   \MW \;\simeq\; [\,\Spec A\,/\,G\,],
+\]
+where $[\Spec A/G]$ is the quotient CFG whose fibre over $R$ is the action
+groupoid $G(R)\ltimes(\Spec A)(R)$.
+\lean{}\notready
+\uses{thm:MW-cfg,lem:univ-elliptic,lem:G-representable,lem:Apoint-elliptic,lem:quotient-compat,lem:fiber-descr}
+\end{theorem}
+\begin{proof}[Proof blueprint]
+On each fibre, Lemma~\ref{lem:Apoint-elliptic} identifies the objects
+$(\Spec A)(R)$ of $[\Spec A/G]$ with the elliptic curves over $R$, and
+Lemma~\ref{lem:quotient-compat} identifies the $G(R)$-action with the
+variable-change action; hence the action groupoid $G(R)\ltimes(\Spec A)(R)$ agrees
+with the fibre groupoid of $\MW$ (Lemma~\ref{lem:fiber-descr} on elliptic curves).
+Naturality in $R$ (Lemma~\ref{lem:quotient-compat}) upgrades these fibre
+equivalences to an equivalence of CFGs.
+\end{proof}
+
+\begin{remark}
+Theorem~\ref{thm:quotient} exhibits $\MW$ as a global quotient stack.  It is the
+entry point to the smoothness of $\Mss$ (the atlas $\Spec A$ is smooth over
+$\mathbb Z$) and to the automorphism group schemes (stabilisers of the
+$G$-action), including the generic automorphism $[-1]$ and the extra automorphisms
+at $j=0,1728$.
+\end{remark}
+
+%==============================================================================
+\section{Descent and the stack condition}\label{sec:descent}
+%==============================================================================
+
+We now formulate what it means for the CFG $\MW$ to be a stack for
+$\tau_{\mathrm{fppf}}$, and reduce it to descent statements.  As flagged in
+Warning~\ref{warn:no-stacks}, the notion of stack is not in Mathlib; the
+definitions here are new.
+
+\begin{definition}[Isom presheaf]\label{def:isompre}
+For a CFG $p:\mathcal X\to\mathcal S$, $S\in\mathcal S$ and $x,y\in\mathcal X(S)$,
+the presheaf $\Isom_S(x,y)$ on the slice $\mathcal S_{/S}$ sends
+$(T\xrightarrow{a}S)$ to the set of isomorphisms $a^*x\xrightarrow{\sim}a^*y$ in
+$\mathcal X(T)$, with restriction by further base change.
+\lean{}\notready
+\uses{def:cfg}
+\end{definition}
+
+\begin{definition}[Prestack, stack]\label{def:stack}
+Let $(\mathcal S,\tau)$ be a site and $p:\mathcal X\to\mathcal S$ a CFG.
+\begin{enumerate}[label=(\alph*)]
+\item $p$ is a \emph{prestack} for $\tau$ if for all $S$ and all
+$x,y\in\mathcal X(S)$ the presheaf $\Isom_S(x,y)$ is a $\tau$-sheaf on
+$\mathcal S_{/S}$ (equivalently: morphisms glue).
+\item A \emph{descent datum} for a covering $\{U_i\to S\}$ is a family
+$x_i\in\mathcal X(U_i)$ with isomorphisms
+$\varphi_{ij}:x_i|_{U_{ij}}\xrightarrow{\sim}x_j|_{U_{ij}}$ satisfying the cocycle
+condition on triple overlaps.  It is \emph{effective} if it is isomorphic to the
+descent datum induced by some $x\in\mathcal X(S)$.
+\item $p$ is a \emph{stack} for $\tau$ if it is a prestack and every descent
+datum for every $\tau$-covering is effective.
+\end{enumerate}
+\lean{}\notready
+\uses{def:isompre,def:site}
+\end{definition}
+
+\begin{proposition}[Representability of $\Isom$ for $\MW$]\label{prop:isom-rep}
+For $W_1,W_2$ elliptic over $R$, the presheaf $\Isom_{\Spec R}(W_1,W_2)$ is
+representable by an affine $R$-scheme: a closed subscheme of
+$G_R=\Gm\times\Ga^3$ (base-changed to $R$) cut out by the five equations
+$C\cdot W_1=W_2$ of Definition~\ref{def:vc} (coefficient-wise).  In particular it
+is an fppf sheaf.
+\lean{}\notready
+\uses{def:isompre,def:vc,def:MW}
+\end{proposition}
+\begin{proof}[Proof blueprint]
+A $T$-point of $\Isom(W_1,W_2)$ over $a:R\to T$ is, by
+Lemma~\ref{lem:fiber-descr}, a $C\in\VC(T)$ with
+$C\cdot(W_1.\map\,a)=W_2.\map\,a$.  Equivalently it is a $T$-point of
+$G_R=\Spec R[u,u^{-1},r,s,t]$ satisfying the five polynomial equations obtained by
+equating coefficients in $C\cdot W_1=W_2$ (a system with $\mathbb Z$-coefficients
+in $u^{\pm1},r,s,t$ and the $a_i(W_1),a_i(W_2)$).  Hence
+$\Isom(W_1,W_2)=\Spec\bigl(R[u,u^{-1},r,s,t]/(\text{those }5\text{ relations})
+\bigr)$, an affine scheme over $R$; representable functors on $\Aff$ are fppf
+sheaves once faithfully flat descent for morphisms is available (see
+Lemma~\ref{lem:repr-sheaf}).
+\end{proof}
+
+\begin{lemma}[Representable $\Rightarrow$ fppf sheaf]\label{lem:repr-sheaf}
+The functor of points of any affine scheme is a sheaf for $\tau_{\mathrm{fppf}}$
+on $\Aff$.  Equivalently: for a faithfully flat ring map $R\to R'$ the Amitsur
+complex
+\[
+   0\to R\to R'\rightrightarrows R'\otimes_R R'\to\cdots
+\]
+is exact; hence $R\to R'$ is an equaliser of
+$R'\rightrightarrows R'\otimes_R R'$ and any $R$-algebra of finite type has the
+descent property.
+\lean{RingHom.FaithfullyFlat, Algebra.amitsurComplex (target)}\notready
+\uses{def:fppf-cover,def:site}
+\end{lemma}
+\begin{proof}[Status]
+The exactness of the Amitsur (Čech--Amitsur) complex for a faithfully flat
+$R\to R'$ is the key input.  Mathlib has \texttt{Module.FaithfullyFlat} and the
+one-step statement that $R\to R'$ is injective with the expected equaliser
+description in low degree; the full cosimplicial exactness and the packaging
+``representable $\Rightarrow$ fppf sheaf'' are targets.  This lemma is a
+self-contained prerequisite, independent of elliptic curves.
+\end{proof}
+
+\begin{theorem}[$\MW$ is an fppf prestack]\label{thm:prestack}
+$p:\MW\to\Aff$ is a prestack for $\tau_{\mathrm{fppf}}$.
+\lean{}\notready
+\uses{def:stack,prop:isom-rep,lem:repr-sheaf}
+\end{theorem}
+\begin{proof}
+Immediate from Proposition~\ref{prop:isom-rep} and Lemma~\ref{lem:repr-sheaf}:
+each $\Isom$ presheaf is representable, hence an fppf sheaf, which is precisely
+the prestack condition of Definition~\ref{def:stack}(a).
+\end{proof}
+
+\begin{theorem}[Effectivity of descent for $\MW$]\label{thm:effective}
+Every fppf descent datum for $\MW$ is effective; hence
+$p:\MW\to\Aff$ is a stack for $\tau_{\mathrm{fppf}}$.
+\lean{}\notready
+\uses{def:stack,thm:prestack}
+\end{theorem}
+\begin{proof}[Proof blueprint and prerequisite ledger]
+Let $\{R\to R_i\}$ be an fppf cover with $R\to R'=\prod R_i$ faithfully flat.  A
+descent datum is a curve $W'$ over $R'$ together with an isomorphism
+$\sigma:\mathrm{pr}_1^*W'\xrightarrow{\sim}\mathrm{pr}_2^*W'$ over
+$R'\otimes_R R'$ satisfying the cocycle condition over
+$R'\otimes_R R'\otimes_R R'$.  Effectivity means: there is an elliptic
+$W$ over $R$ and an isomorphism $W'\cong W.\map\,(R\to R')$ carrying the canonical
+datum to $(W',\sigma)$.  The reduction proceeds by descending the coefficients:
+\begin{enumerate}[label=(\roman*)]
+\item Each coefficient $a_k(W')\in R'$ together with the transformation
+prescribed by $\sigma$ (a variable change $C\in\VC(R'\otimes_R R')$) constitutes
+a descent datum for the quasi-coherent sheaf underlying the Weierstrass data.
+Because $\sigma$ need not be the identity, the naive coefficient-wise descent
+fails in general; what descends is the pair (line bundle $\omega$, section data),
+which is why the twist by $\mathrm{Pic}$ appears (Warning~\ref{warn:pic}).
+\item \textbf{Prerequisite: fppf descent for quasi-coherent modules.}  For a
+faithfully flat $R\to R'$, the category of $R$-modules is equivalent to the
+category of $R'$-modules with descent data (Grothendieck).  This is
+\emph{not} in Mathlib; it is the load-bearing missing input.  Its statement:
+the base-change functor $\mathrm{Mod}_R\to\mathrm{Desc}(R'/R)$ is an equivalence.
+\item \textbf{Prerequisite: fppf descent for the multiplicative and additive
+group.}  $\Gm$ and $\Ga$ are fppf sheaves (special case of (ii) / of
+Lemma~\ref{lem:repr-sheaf}); this handles the descent of the unit $u$ and of the
+translation parameters $r,s,t$ in $\sigma$.
+\item Granting (ii)--(iii), the descent datum $(W',\sigma)$ is effective: the
+Hodge line bundle $\omega'=p'_*\Omega$ (in the affine model, the invertible
+$R'$-module attached to $\sigma$) descends to an invertible $R$-module $\omega$;
+choosing (fppf-locally) a trivialisation recovers a Weierstrass equation, and the
+cocycle condition guarantees the descended $(a_k)\in R$ define an elliptic curve
+$W$ over $R$ inducing $(W',\sigma)$.  When $\omega$ is globally trivial (e.g.\
+$\mathrm{Pic}(R)=0$) the descent is a genuine Weierstrass curve over $R$; in
+general $W$ exists in the stackification.
+\end{enumerate}
+Thus, modulo the descent prerequisites (ii)--(iii), $\MW$ satisfies effective
+descent and is an fppf stack.  The honest statement of current feasibility: the
+prestack theorem~\ref{thm:prestack} is reachable from present Mathlib plus
+Lemma~\ref{lem:repr-sheaf}; the effectivity theorem requires the quasi-coherent
+descent package (ii), a substantial independent development.
+\end{proof}
+
+\begin{remark}[Stackification]\label{rem:stackification}
+Since Mathlib lacks stackification, the clean statement ``the fppf-stackification
+of $\MW$ is $\Mss$'' (Theorem~\ref{thm:comparison}) presupposes a new
+\texttt{Stackification} construction (the $2$-categorical analogue of
+\texttt{presheafToSheaf}).  Building it is a self-contained category-theory
+target: sheafify the object- and morphism-presheaves and check the universal
+property.  It is listed as milestone \textbf{M8}.
+\end{remark}
+
+%==============================================================================
+\section{Comparison with the geometric moduli stack}\label{sec:comparison}
+%==============================================================================
+
+\begin{definition}[Elliptic curve over a scheme; $\Mss$]\label{def:geomell}
+An \emph{elliptic curve} over a scheme $S$ is a morphism $p:E\to S$ that is proper,
+smooth, of relative dimension one, with geometrically connected fibres of
+arithmetic genus one, together with a section $e:S\to E$.  A morphism of elliptic
+curves over $a:T\to S$ is a cartesian square inducing $E_T\xrightarrow{\sim}
+a^*E$ compatibly with sections.  The resulting category $\Mss$ over $\Sch$ (or
+over $\Aff$, or over $\Sch_{/\mathbb Z}$) is fibered in groupoids; this is the
+\emph{moduli stack of elliptic curves} \cite{DeligneRapoport,KatzMazur,Olsson}.
+\lean{}\notready
+\uses{def:cfg}
+\end{definition}
+
+\begin{theorem}[Comparison]\label{thm:comparison}
+There is a morphism of CFGs $\Phi:\MW\to\Mss$ over $\Aff$ sending an elliptic
+Weierstrass curve $W$ over $R$ to $\mathrm{Proj}$ of its homogeneous coordinate
+ring (the projective plane cubic with the point at infinity as section).  Then:
+\begin{enumerate}[label=(\alph*)]
+\item For $R$ with $\mathrm{Pic}(R)[12]=0$ (in particular $\mathrm{Pic}(R)=0$,
+e.g.\ $R$ local or a PID), $\Phi_R:\MW(R)\to\Mss(R)$ is an equivalence of
+groupoids.
+\item In general $\Phi$ exhibits $\Mss$ as the fppf-stackification of $\MW$;
+equivalently, every elliptic curve over $S$ admits a Weierstrass equation
+Zariski-locally on $S$, and the obstruction to a global one lies in
+$\mathrm{Pic}(S)$ via the Hodge bundle.
+\end{enumerate}
+\lean{}\notready
+\uses{def:MW,def:geomell,thm:quotient,rem:stackification,warn:pic}
+\end{theorem}
+\begin{proof}[Discussion and prerequisites]
+The construction of $\Phi$ and the proof of (a),(b) are the content of
+\cite[II.2, III.1, III.3]{Silverman}, \cite[\S2.1--2.2]{Deligne1975},
+\cite[Ch.~2]{KatzMazur}.  The essential geometric facts are: (1) an elliptic
+curve $E/S$ has $p_*\mathcal O_E=\mathcal O_S$ and an invertible
+$\omega=p_*\Omega_{E/S}$; (2) Riemann--Roch for the section divisor yields a
+closed immersion $E\hookrightarrow\mathbb P(p_*\mathcal O_E(3e))$ realising $E$
+as a Weierstrass cubic once $\omega$ is trivialised; (3) two Weierstrass models of
+the same $E$ differ by a variable change, matching
+Definition~\ref{def:vc}.  Each of these presupposes machinery not in Mathlib.
+
+\medskip\noindent\textbf{Missing scheme-theoretic prerequisites
+(future-work ledger).}  In rough dependency order:
+\begin{enumerate}[label=(P\arabic*),leftmargin=3.2em]
+\item proper morphisms of schemes and their stability
+      (\texttt{AlgebraicGeometry.IsProper}, partial);
+\item smooth morphisms and relative dimension (partial in
+      \texttt{AlgebraicGeometry.Morphisms.Smooth});
+\item relative differentials $\Omega_{E/S}$ and the dualising/Hodge line bundle;
+\item higher direct images $R^i p_*$ and cohomology-and-base-change, giving
+      $p_*\mathcal O_E=\mathcal O_S$ and invertibility of $\omega$;
+\item relative Riemann--Roch / relative $\mathrm{Proj}$ and the very-ampleness of
+      $\mathcal O_E(3e)$;
+\item the classification of Weierstrass models of a fixed $E$ (the ``$3e$''
+      embedding and its normal form), reproducing Definition~\ref{def:vc};
+\item faithfully flat / fppf descent for quasi-coherent sheaves
+      (Theorem~\ref{thm:effective}(ii)) and for schemes;
+\item the $2$-categorical stackification of Remark~\ref{rem:stackification}.
+\end{enumerate}
+Consequently, within a horizon fixed by present Mathlib, the achievable target is
+Parts~\ref{sec:weier}--\ref{sec:moduli} (the CFG $\MW$, its groupoid fibres, and
+the quotient presentation) together with Theorem~\ref{thm:prestack} (the fppf
+prestack property, modulo Lemma~\ref{lem:repr-sheaf}).  Theorem~\ref{thm:comparison}
+and Theorem~\ref{thm:effective} are longer-term and are stated here to fix the
+mathematically correct target and to make the dependency on (P1)--(P8) explicit.
+\end{proof}
+
+\begin{remark}[Algebraicity of $\Mss$]\label{rem:algebraicity}
+With (P1)--(P8) in hand, Theorem~\ref{thm:quotient} shows $\Mss$ is a global
+quotient stack $[\Spec A/G]$, hence a smooth algebraic (Artin) stack of relative
+dimension one over $\Spec\mathbb Z$, separated, and Deligne--Mumford over
+$\mathbb Z[1/6]$ (the automorphism group schemes are finite étale away from
+characteristics $2,3$) \cite{DeligneRapoport,Olsson}.  These are statements about
+$\Mss$, downstream of the entire ledger, recorded for orientation.
+\end{remark}
+
+%==============================================================================
+\section{Milestone ladder}\label{sec:ladder}
+%==============================================================================
+
+The following orders the work by Mathlib-readiness.  Milestones
+\textbf{M0}--\textbf{M5} are reachable from present Mathlib; \textbf{M6}--\textbf{M9}
+depend on independent developments (descent, stackification, scheme geometry).
+
+\begin{description}[leftmargin=3.4em,style=nextline]
+\item[\textbf{M0} — Substrate audit.]  Confirm the interface of
+  Definitions~\ref{def:homlift}--\ref{def:site}, \ref{def:weier}--\ref{def:iselliptic}
+  against the pinned Mathlib commit; add missing thin API
+  (\texttt{VariableChange.map}, \texttt{map\_j}, \texttt{IsElliptic.map} if
+  absent).  \emph{Depends on:} nothing.
+\item[\textbf{M1} — Equivariance.]  Definition~\ref{def:vc-map};
+  Lemmas~\ref{lem:vc-map-one}, \ref{lem:vc-map-mul}, \ref{lem:vc-map-id},
+  \ref{lem:vc-map-comp}; Lemma~\ref{lem:equivariance}.  \emph{Depends on:} M0.
+\item[\textbf{M2} — The fibered category $\Weier$.]
+  Definitions~\ref{def:total-obj}--\ref{def:total-comp} with
+  Lemmas~\ref{lem:id-welldef}, \ref{lem:comp-welldef}; the category axioms
+  \ref{lem:total-id-comp}--\ref{lem:total-assoc} and Definition~\ref{def:total};
+  the projection \ref{def:proj}; the lift/fibre lemmas
+  \ref{lem:homlift-mor}--\ref{lem:fiber-descr}; strong cartesianness
+  \ref{lem:scart-welldef}--\ref{lem:scart}; prefiberedness
+  \ref{lem:weier-prefibered}; Theorem~\ref{thm:weier-fibered}; the groupoid
+  criterion \ref{prop:cfg-suff}--\ref{prop:cfg-criterion}; Corollary~\ref{cor:weier-cfg}.
+  \emph{Depends on:} M1 and the \texttt{FiberedCategory} API.
+\item[\textbf{M3} — The moduli CFG $\MW$.]  Lemmas~\ref{lem:iselliptic-map},
+  \ref{lem:iselliptic-vc}; Definitions~\ref{def:MW}, \ref{def:MW-proj};
+  Lemmas~\ref{lem:MW-lift}--\ref{lem:MW-fiber-groupoid}; Theorem~\ref{thm:MW-cfg};
+  the $j$-invariant nodes \ref{def:affine-line}, \ref{lem:j-vc}, \ref{lem:j-map},
+  \ref{def:jmap}, \ref{lem:ofJ-j}, \ref{prop:j-surj}.  \emph{Depends on:} M2.
+\item[\textbf{M4} — Quotient presentation.]
+  Definitions~\ref{def:univ-ring-P}--\ref{def:univ} with
+  Lemma~\ref{lem:univ-elliptic}; the group nodes \ref{def:G},
+  \ref{lem:G-representable}, \ref{def:G-action}; Lemmas~\ref{lem:Apoint-elliptic},
+  \ref{lem:quotient-compat}; Theorem~\ref{thm:quotient}.  \emph{Depends on:} M3
+  and the functor-of-points/Yoneda API for \texttt{MvPolynomial} and
+  \texttt{Localization.Away}.
+\item[\textbf{M5} — Pseudofunctor route (optional).]
+  Definition~\ref{def:F-map}; Constructions~\ref{con:pseudofunctor},
+  \ref{con:weier-cogroth}; along it Theorem~\ref{thm:weier-fibered} is discharged
+  by Proposition~\ref{prop:cogroth-fibered}.  \emph{Depends on:} M1 (to build the
+  pseudofunctor $\mathbf F$, including its coherences) and
+  \texttt{Pseudofunctor.CoGrothendieck} together with
+  \texttt{FiberedCategory.Grothendieck}
+  (\texttt{CoGrothendieck.instIsFiberedForget}).
+\item[\textbf{M6} — fppf site.]  Definition~\ref{def:fppf-cover};
+  Lemma~\ref{lem:fppf-pretop}; Lemma~\ref{lem:repr-sheaf}.  \emph{Depends on:}
+  flatness/finite-presentation base-change API and the Amitsur complex.
+\item[\textbf{M7} — Prestack.]  Definitions~\ref{def:isompre},\ref{def:stack};
+  Proposition~\ref{prop:isom-rep}; Theorem~\ref{thm:prestack}.  \emph{Depends on:}
+  M3, M6.
+\item[\textbf{M8} — Descent and stackification.]  Theorem~\ref{thm:effective}
+  (needs quasi-coherent fppf descent, P7); Remark~\ref{rem:stackification} (the
+  stackification functor).  \emph{Depends on:} M7 and P7.
+\item[\textbf{M9} — Geometric comparison.]  Definition~\ref{def:geomell};
+  Theorem~\ref{thm:comparison}; Remark~\ref{rem:algebraicity}.  \emph{Depends on:}
+  M8 and the scheme-geometry ledger (P1)--(P6).
+\end{description}
+
+%==============================================================================
+\section*{Appendix A. Explicit formulas and their Mathlib names}
+\addcontentsline{toc}{section}{Appendix A. Explicit formulas}
+%==============================================================================
+
+The variable-change action is that of Definition~\ref{def:vc}, matching
+\cite[III, Table~3.1]{Silverman} and the Mathlib instance
+\texttt{WeierstrassCurve.instMulActionVariableChange}.  The transformation weights
+are: $c_4\mapsto u^{-4}c_4$, $c_6\mapsto u^{-6}c_6$, $\Delta\mapsto
+u^{-12}\Delta$, and $j\mapsto j$ (invariant); the corresponding Mathlib lemmas are
+\texttt{variableChange\_c4}, \texttt{variableChange\_c6},
+\texttt{variableChange\_Delta}, \texttt{variableChange\_j}.  Under base change
+$f:R\to A$ the invariants are natural: $c_4,c_6,\Delta,j$ commute with $f$, via
+\texttt{map\_c4}, \texttt{map\_c6}, \texttt{map\_Delta}, \texttt{map\_j}.  The
+identity $c_4^3-c_6^2=1728\,\Delta$ is \texttt{WeierstrassCurve.c4\_cubed\_...}
+(coefficient identity in \texttt{Mathlib.AlgebraicGeometry.EllipticCurve.Weierstrass}).
+
+%==============================================================================
+\section*{Appendix B. Formalisation status by item}
+\addcontentsline{toc}{section}{Appendix B. Formalisation status}
+%==============================================================================
+
+\noindent\textbf{Already in Mathlib} (mark \leanok): the fibered-category API
+(Definitions~\ref{def:homlift}--\ref{def:fiber},
+Lemma~\ref{lem:scart-api}, Definition~\ref{def:isfibered}); the Grothendieck and
+CoGrothendieck constructions of a pseudofunctor (Remark~\ref{rem:grothendieck})
+and the theorem that the CoGrothendieck projection is a fibered category
+(Proposition~\ref{prop:cogroth-fibered},
+\texttt{Mathlib.CategoryTheory.FiberedCategory.Grothendieck}); sites and
+sheaves (Definition~\ref{def:site}); the Weierstrass/elliptic-curve API
+(Definitions~\ref{def:weier}--\ref{def:iselliptic},
+Lemmas~\ref{lem:map-func},\ref{lem:vc-invariants}).
+
+\smallskip\noindent\textbf{New but reachable now} (M1--M5, M6-partial):
+Lemma~\ref{lem:equivariance}; the category $\Weier$ and its CFG structure;
+$\MW$ and Theorem~\ref{thm:MW-cfg}; the quotient presentation
+Theorem~\ref{thm:quotient}; the fppf pretopology and
+Lemma~\ref{lem:repr-sheaf} (the latter needing the Amitsur complex).
+
+\smallskip\noindent\textbf{New and dependent on major developments} (M8--M9):
+Theorem~\ref{thm:effective} (quasi-coherent fppf descent, P7); stackification
+(Remark~\ref{rem:stackification}); Definition~\ref{def:geomell} and
+Theorem~\ref{thm:comparison} (the scheme-geometry ledger P1--P8);
+Remark~\ref{rem:algebraicity}.
+
+\begin{thebibliography}{9}
+
+\bibitem{Deligne1975}
+P.~Deligne, \emph{Courbes elliptiques: formulaire d'après J.~Tate}, in
+\emph{Modular Functions of One Variable IV}, Lecture Notes in Math.\ \textbf{476},
+Springer, 1975, 53--73.
+
+\bibitem{DeligneRapoport}
+P.~Deligne, M.~Rapoport, \emph{Les schémas de modules de courbes elliptiques}, in
+\emph{Modular Functions of One Variable II}, Lecture Notes in Math.\ \textbf{349},
+Springer, 1973, 143--316.
+
+\bibitem{FGA}
+B.~Fantechi et al., \emph{Fundamental Algebraic Geometry: Grothendieck's FGA
+Explained}, Math.\ Surveys Monogr.\ \textbf{123}, AMS, 2005.  (Vistoli's chapter
+on Grothendieck topologies, fibered categories and descent.)
+
+\bibitem{KatzMazur}
+N.~Katz, B.~Mazur, \emph{Arithmetic Moduli of Elliptic Curves}, Ann.\ of Math.\
+Stud.\ \textbf{108}, Princeton, 1985.
+
+\bibitem{Olsson}
+M.~Olsson, \emph{Algebraic Spaces and Stacks}, AMS Colloq.\ Publ.\ \textbf{62},
+2016.
+
+\bibitem{Silverman}
+J.~H.~Silverman, \emph{The Arithmetic of Elliptic Curves}, 2nd ed., GTM
+\textbf{106}, Springer, 2009.  (Chapter III, especially Table~3.1.)
+
+\bibitem{Vistoli2008}
+A.~Vistoli, \emph{Notes on Grothendieck topologies, fibered categories and descent
+theory}, 2008.
+
+\bibitem{StacksProject}
+The Stacks Project Authors, \emph{The Stacks Project},
+\texttt{https://stacks.math.columbia.edu}.
+
+\end{thebibliography}
+
+\end{document}
