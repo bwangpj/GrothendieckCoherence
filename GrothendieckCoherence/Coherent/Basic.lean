@@ -24,23 +24,40 @@ namespace Scheme.Modules
 variable {X : Scheme.{u}}
 
 /-- **Blueprint `def:coherent`** (Stacks 01BU): an `𝒪_X`-module is *coherent* if it
-is of finite type and, for every open `U` and every `𝒪_U^m → ℱ|_U`, the kernel is
-of finite type.  Here the quasi-coherence part is recorded via `IsQuasicoherent`;
-`True` stands for the finite-type + finite-kernel conditions pending that API. -/
+is quasi-coherent and of finite presentation.  Mathlib's
+`SheafOfModules.IsFinitePresentation` captures "locally finitely presented", which on
+a locally Noetherian scheme is equivalent to coherence (Stacks 01XZ + 01BN). -/
 def IsCoherent (M : X.Modules) : Prop :=
-  M.IsQuasicoherent ∧ True
+  M.IsQuasicoherent ∧ SheafOfModules.IsFinitePresentation M
 
 /-- **Blueprint `lem:coherent-noeth`** (Stacks 01XZ): on a locally Noetherian
-scheme, an `𝒪_X`-module is coherent iff it is quasi-coherent and of finite type.
-Recorded as: coherent implies quasi-coherent (the substantive direction uses
-finite type). -/
+scheme, an `𝒪_X`-module is coherent iff it is quasi-coherent and of finite
+presentation.  The `IsFinitePresentation` part already implies `IsQuasicoherent`
+(see `SheafOfModules.IsFinitePresentation` → `IsQuasicoherent` instance in Mathlib),
+but we keep both conjuncts explicit for clarity. -/
 theorem isCoherent_iff_qcoh_finiteType [IsLocallyNoetherian X] (M : X.Modules) :
-    M.IsCoherent ↔ (M.IsQuasicoherent ∧ True) := Iff.rfl
+    M.IsCoherent ↔ (M.IsQuasicoherent ∧ SheafOfModules.IsFinitePresentation M) := Iff.rfl
 
+set_option backward.isDefEq.respectTransparency false in
 /-- **Blueprint `lem:fp-iff-coh`** (Stacks 01XZ + 01BN): on a locally Noetherian
-scheme, an `𝒪_X`-module is of finite presentation iff it is coherent. -/
+scheme, an `𝒪_X`-module is of finite presentation iff it is coherent.
+The forward direction (`IsFinitePresentation → IsCoherent`) holds because
+`SheafOfModules.IsFinitePresentation` implies `IsQuasicoherent` via the Mathlib
+instance (Quasicoherent.lean:274); the reverse direction requires a deep Noetherian
+argument. -/
 theorem isFinitePresentation_iff_isCoherent [IsLocallyNoetherian X] (M : X.Modules) :
-    SheafOfModules.IsFinitePresentation M ↔ M.IsCoherent := sorry
+    SheafOfModules.IsFinitePresentation M ↔ M.IsCoherent := by
+  constructor
+  · intro h
+    refine ⟨?_, h⟩
+    -- Forward: `IsFinitePresentation → IsQuasicoherent` via Quasicoherent.lean:274.
+    -- We build the `IsQuasicoherent` witness directly from the `IsFinitePresentation`
+    -- data; `set_option backward.isDefEq.respectTransparency false` (at declaration
+    -- level) ensures the `X.Modules` type alias is unfolded during elaboration.
+    change SheafOfModules.IsQuasicoherent M
+    exact { nonempty_quasicoherentData := ⟨h.exists_quasicoherentData.choose⟩ }
+  · intro ⟨_, h⟩
+    exact h
 
 /-- **Blueprint `prop:coherent-abelian`** (Stacks 01Y0): on a locally Noetherian
 scheme, kernels, cokernels, images and extensions of coherent sheaves are

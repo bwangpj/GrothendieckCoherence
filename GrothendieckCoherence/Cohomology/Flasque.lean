@@ -15,15 +15,15 @@ universe v u
 
 namespace TopCat.Presheaf
 
-/-- **Blueprint `def:flasque`** (Stacks 01AF): a presheaf is *flasque* if every
-restriction map `F(U) → F(V)` for `V ⊆ U` is an epimorphism (surjective). -/
-def IsFlasque {C : Type*} [Category C] {X : TopCat} (F : TopCat.Presheaf C X) : Prop :=
-  ∀ {U V : TopologicalSpace.Opens X} (i : V ⟶ U), Epi (F.map i.op)
+-- `IsFlasque` is now a class in Mathlib (`TopCat.Presheaf.IsFlasque`):
+--   class IsFlasque (F : Presheaf C X) : Prop where
+--     epi : ∀ {U V : (Opens X)ᵒᵖ} (i : U ⟶ V), Epi (F.map i)
+-- **Blueprint `def:flasque`** (Stacks 01AF): a presheaf is *flasque* if every
+-- restriction map `F(U) → F(V)` for `V ⊆ U` is an epimorphism (surjective).
 
-/-- **Blueprint `lem:pushforward-flasque`** (Stacks 01E9): if `F` is flasque and
-`g` continuous then `g_* F` is flasque, since `(g_* F)(V) = F(g⁻¹ V)`. -/
-theorem isFlasque_pushforward {C : Type*} [Category C] {X Y : TopCat} (g : X ⟶ Y)
-    (F : TopCat.Presheaf C X) (hF : F.IsFlasque) : (g _* F).IsFlasque := sorry
+-- `isFlasque_pushforward` / **Blueprint `lem:pushforward-flasque`** (Stacks 01E9):
+-- if `F` is flasque and `g` continuous then `g_* F` is flasque.
+-- This is now `TopCat.Presheaf.IsFlasque.pushforward_isFlasque` in Mathlib.
 
 end TopCat.Presheaf
 

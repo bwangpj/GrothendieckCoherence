@@ -21,12 +21,27 @@ universe u
 
 variable {X Y Z : Scheme.{u}}
 
+/-- **Foundational instance (Grothendieck's theorem, `EnoughInjectives`).**
+`X.Modules = SheafOfModules X.ringCatSheaf` is a Grothendieck abelian category and
+therefore has enough injectives, hence injective resolutions. Mathlib records
+this for `Sheaf J A` (with `HasSheafify`) but not yet for the `SheafOfModules`
+structure, and the `def` `X.Modules` is opaque to instance search, so we bridge it
+here. This is a known-true fact; discharging the `sorry` means porting the
+Grothendieck-abelian instance to `SheafOfModules`. Every use of `Rⁱ f_*` and
+`Hⁱ(X,-)` depends on it. -/
+noncomputable instance instHasInjectiveResolutionsModules (X : Scheme.{u}) :
+    HasInjectiveResolutions X.Modules := ⟨fun _ => ⟨sorry⟩⟩
+
 /-- Global sections functor `Γ(X, -) : X.Modules ⥤ Ab`, as the underlying abelian
 presheaf evaluated on the whole space. Blueprint: underlies `def:sheaf-cohomology`. -/
 noncomputable def sectionsFunctor (X : Scheme.{u}) : X.Modules ⥤ Ab.{u} :=
-  Modules.toPresheaf X ⋙ (evaluation _ _).obj (Opposite.op ⊤)
+  Modules.toPresheaf X ⋙ (CategoryTheory.evaluation _ _).obj (Opposite.op ⊤)
 
+-- `sectionsFunctor X` maps `φ : M ⟶ N` to `φ.app ⊤ : Γ(M,⊤) →+ Γ(N,⊤)` definitionally
+-- (via `toPresheaf_map` and `mapPresheaf_app`, which are both `rfl`-lemmas).
+-- Additivity then follows from `Modules.Hom.add_app : (φ + ψ).app U = φ.app U + ψ.app U`.
 instance (X : Scheme.{u}) : (sectionsFunctor X).Additive where
+  map_add {M N φ ψ} := Modules.Hom.add_app φ ψ (U := ⊤)
 
 /-- **Blueprint `def:sheaf-cohomology`** (Stacks 01FR).
 `Hⁱ(X, -)` is the `i`-th right derived functor of `Γ(X, -)`. -/

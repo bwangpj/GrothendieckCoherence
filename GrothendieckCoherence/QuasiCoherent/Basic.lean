@@ -32,15 +32,18 @@ with the abstract `SheafOfModules.IsQuasicoherent`. -/
 theorem isQuasicoherent_iff_sheafOfModules (M : X.Modules) :
     M.IsQuasicoherent ↔ SheafOfModules.IsQuasicoherent M := Iff.rfl
 
-/-- **Blueprint `lem:qcoh-local`** (Stacks 01I6): quasi-coherence is local on `X`. -/
+/-- **Blueprint `lem:qcoh-local`** (Stacks 01I6): quasi-coherence is local on `X`.
+If `M` is quasi-coherent on each member of an open cover, then `M` is quasi-coherent. -/
 theorem isQuasicoherent_of_cover {ι : Type u} (M : X.Modules)
     (U : ι → X.Opens) (hU : ⨆ i, U i = ⊤)
-    (h : ∀ i, True) : M.IsQuasicoherent := sorry
+    (h : ∀ i, ((AlgebraicGeometry.Scheme.Modules.pullback (U i).ι).obj M).IsQuasicoherent) :
+    M.IsQuasicoherent := sorry
 
 /-- **Blueprint `lem:qcoh-basic`** (Stacks 01BM): `𝒪_X` is quasi-coherent and
 pullback preserves quasi-coherence. -/
 theorem isQuasicoherent_pullback (f : X ⟶ Y) (N : Y.Modules)
-    (hN : N.IsQuasicoherent) : ((Modules.pullback f).obj N).IsQuasicoherent := sorry
+    (hN : N.IsQuasicoherent) :
+    ((AlgebraicGeometry.Scheme.Modules.pullback f).obj N).IsQuasicoherent := sorry
 
 /-- **Blueprint `prop:qcoh-abelian`** (Stacks 01LA): kernels, cokernels, images,
 finite direct sums and extensions of quasi-coherent sheaves are quasi-coherent;
